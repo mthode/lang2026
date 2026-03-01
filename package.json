@@ -1,0 +1,20 @@
+{
+  "name": "lang2026",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "browser": "npm run build && node scripts/serve-browser.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "repl": "npm run build && node dist/terminal/cli.js",
+    "run:script": "npm run build && node dist/terminal/run-script.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

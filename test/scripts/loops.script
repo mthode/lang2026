@@ -1,0 +1,2 @@
+while 3 - loop do { echo $loop }
+for i from 1 to 3 do { echo $i }

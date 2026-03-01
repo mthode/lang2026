@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lang2026 Browser REPL</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #111827;
+        color: #e5e7eb;
+        display: grid;
+        place-items: center;
+      }
+
+      .app {
+        width: min(900px, 92vw);
+        padding: 1rem;
+        background: #1f2937;
+        border: 1px solid #374151;
+        border-radius: 0.5rem;
+      }
+
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1rem;
+      }
+
+      #repl-input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #4b5563;
+        border-radius: 0.375rem;
+        background: #0f172a;
+        color: #e5e7eb;
+        padding: 0.6rem 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+
+      #repl-output {
+        min-height: 260px;
+        max-height: 55vh;
+        overflow: auto;
+        border: 1px solid #374151;
+        border-radius: 0.375rem;
+        background: #0b1220;
+        padding: 0.6rem 0.75rem;
+      }
+
+      #repl-output > div {
+        padding: 0.1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <h1>lang2026 REPL</h1>
+      <input id="repl-input" type="text" placeholder="Type a command and press Enter" autocomplete="off" />
+      <div id="repl-output" aria-live="polite"></div>
+    </main>
+
+    <script type="module">
+      const input = document.getElementById("repl-input");
+      const output = document.getElementById("repl-output");
+
+      if (!(input instanceof HTMLInputElement) || !(output instanceof HTMLElement)) {
+        throw new Error("REPL elements not found");
+      }
+
+      try {
+        const { ReplEngine } = await import("../dist/repl/index.js");
+        const engine = new ReplEngine();
+
+        input.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+
+          const line = input.value;
+          input.value = "";
+
+          try {
+            const result = await engine.evaluate(line);
+            const text = result.pending ? "..." : result.output ?? "ok";
+            const row = document.createElement("div");
+            row.textContent = text;
+            output.appendChild(row);
+            output.scrollTop = output.scrollHeight;
+          } catch (error) {
+            const row = document.createElement("div");
+            row.style.color = "#fca5a5";
+            row.textContent = `error: ${error instanceof Error ? error.message : String(error)}`;
+            output.appendChild(row);
+            output.scrollTop = output.scrollHeight;
+          }
+        });
+      } catch (error) {
+        const row = document.createElement("div");
+        row.style.color = "#fca5a5";
+        row.textContent = `Failed to initialize REPL: ${error instanceof Error ? error.message : String(error)}. Open this page over HTTP (run 'npm run browser' and use http://localhost:4173/browser/index.html).`;
+        output.appendChild(row);
+      }
+    </script>
+  </body>
+</html>

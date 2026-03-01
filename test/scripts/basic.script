@@ -1,0 +1,3 @@
+echo hello script
+
+eval (2 + 2) * 3

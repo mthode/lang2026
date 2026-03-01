@@ -1,0 +1,223 @@
+import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
+import { scan, type Token } from "../../scanner/index.js";
+import { renderTemplateVariables } from "../utils/expression.js";
+import type { ShellCommandContext, ShellCommandExecutor, ShellEnvironment, UserFunctionDefinition } from "./types.js";
+
+type FunctionArgDeclaration = UserFunctionDefinition["declarations"][number];
+
+export const executeFuncCommand: ShellCommandExecutor = (command, _context, environment) => {
+    const declarationSource = readRawVararg(command.args.declaration).join(" ").trim();
+    if (declarationSource.length === 0) {
+      throw new Error("'func' requires: func FUNCTION_NAME ARG_DECLS { COMMANDS }");
+    }
+
+    const definition = parseFunctionDefinition(declarationSource);
+    environment.functions.set(definition.name, definition);
+    return undefined;
+};
+
+export function executeUserFunction(
+  commandName: string,
+  statementRaw: string,
+  context: ShellCommandContext,
+  environment: ShellEnvironment
+): string | undefined {
+  const definition = environment.functions.get(commandName);
+  if (!definition) {
+    return undefined;
+  }
+
+  const remainder = getCommandArgumentSource(statementRaw);
+  const segments = splitArgumentSegments(remainder);
+  const invocation = parseInvocationArguments(definition, segments, context, environment);
+  const resolvedBody = renderTemplateVariables(definition.body, invocation);
+
+  const outputs: string[] = [];
+  const statements = context.parseScript(resolvedBody);
+  for (const statement of statements) {
+    const output = context.executeStatement(statement, environment);
+    if (output !== undefined) {
+      outputs.push(output);
+    }
+  }
+
+  return outputs.length > 0 ? outputs.join("\n") : undefined;
+}
+
+function parseFunctionDefinition(source: string): UserFunctionDefinition {
+  const block = extractNestedBlock(source, 0);
+  const header = source.slice(0, block.openIndex).trim();
+  const trailing = source.slice(block.closeIndex + 1).trim();
+  if (trailing.length > 0) {
+    throw new Error("Unexpected content after function body");
+  }
+
+  const tokens = header.split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length === 0) {
+    throw new Error("Missing function name");
+  }
+
+  const [name, ...argTokens] = tokens;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid function name '${name}'`);
+  }
+
+  const declarations = argTokens.map(parseFunctionArgToken);
+  return {
+    name,
+    declarations,
+    body: block.content
+  };
+}
+
+function parseFunctionArgToken(token: string): FunctionArgDeclaration {
+  const optional = token.startsWith("[") && token.endsWith("]");
+  const inner = optional ? token.slice(1, -1) : token;
+
+  if (inner.includes(":")) {
+    const [name, rawCount] = inner.split(":");
+    if (!name || !rawCount) {
+      throw new Error(`Invalid argument declaration '${token}'`);
+    }
+
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`Invalid named argument declaration '${token}'`);
+    }
+
+    const valueCount = Number(rawCount);
+    if (!Number.isInteger(valueCount) || valueCount < 0) {
+      throw new Error(`Invalid NUM_ARGS in declaration '${token}'`);
+    }
+
+    return {
+      name,
+      optional,
+      mode: "named",
+      valueCount
+    };
+  }
+
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inner)) {
+    throw new Error(`Invalid positional argument declaration '${token}'`);
+  }
+
+  return {
+    name: inner,
+    optional,
+    mode: "positional"
+  };
+}
+
+function parseInvocationArguments(
+  definition: UserFunctionDefinition,
+  segments: string[],
+  context: ShellCommandContext,
+  environment: ShellEnvironment
+): Record<string, string | string[] | boolean | undefined> {
+  const args: Record<string, string | string[] | boolean | undefined> = {};
+  let cursor = 0;
+
+  for (const declaration of definition.declarations) {
+    if (declaration.mode === "positional") {
+      if (cursor >= segments.length) {
+        if (declaration.optional) {
+          args[declaration.name] = undefined;
+          continue;
+        }
+        throw new Error(`Missing required positional argument '${declaration.name}'`);
+      }
+
+      const value = segments[cursor] ?? "";
+      validateExpression(value, declaration.name, context, environment);
+      args[declaration.name] = value;
+      cursor += 1;
+      continue;
+    }
+
+    const token = segments[cursor] ?? "";
+    if (token !== declaration.name) {
+      if (declaration.optional) {
+        args[declaration.name] = declaration.valueCount === 0 ? false : undefined;
+        continue;
+      }
+      throw new Error(`Missing required named argument '${declaration.name}'`);
+    }
+
+    cursor += 1;
+
+    if (declaration.valueCount === 0) {
+      args[declaration.name] = true;
+      continue;
+    }
+
+    if (cursor + declaration.valueCount > segments.length) {
+      throw new Error(`Named argument '${declaration.name}' expects ${declaration.valueCount} values`);
+    }
+
+    const values = segments.slice(cursor, cursor + declaration.valueCount);
+    values.forEach((value, index) => validateExpression(value, `${declaration.name}[${index}]`, context, environment));
+    cursor += declaration.valueCount;
+
+    args[declaration.name] = declaration.valueCount === 1 ? values[0] : values;
+  }
+
+  if (cursor < segments.length) {
+    throw new Error("Unexpected extra arguments when calling function");
+  }
+
+  return args;
+}
+
+function validateExpression(source: string, argName: string, context: ShellCommandContext, environment: ShellEnvironment): void {
+  try {
+    const statement = context.parseLine(`eval ${source}`);
+    context.executeStatement(statement, environment);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid expression for argument '${argName}': ${message}`);
+  }
+}
+
+function splitArgumentSegments(source: string): string[] {
+  if (source.trim().length === 0) {
+    return [];
+  }
+
+  const tokens = scan(source);
+  const segments: string[] = [];
+  let current: Token[] = [];
+  let depth = 0;
+
+  for (const token of tokens) {
+    if (token.value === "(" || token.value === "[" || token.value === "{") depth += 1;
+    if (token.value === ")" || token.value === "]" || token.value === "}") depth = Math.max(0, depth - 1);
+
+    if (depth === 0 && (token.type === "whitespace" || token.type === "newline" || token.type === "comment")) {
+      if (current.length > 0) {
+        segments.push(current.map((t) => t.value).join(""));
+        current = [];
+      }
+      continue;
+    }
+
+    current.push(token);
+  }
+
+  if (current.length > 0) {
+    segments.push(current.map((t) => t.value).join(""));
+  }
+
+  return segments;
+}
+
+function readRawVararg(value: unknown): string[] {
+  if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  return [];
+}
