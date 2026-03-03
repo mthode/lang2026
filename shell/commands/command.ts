@@ -1,5 +1,6 @@
 import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
 import { splitArgumentSegments } from "../utils/arguments.js";
+import { executeBodyStatements } from "../utils/body.js";
 import { renderTemplateVariables } from "../utils/expression.js";
 import type {
   ShellCommandContext,
@@ -37,14 +38,7 @@ export function executeUserCommand(
   const invocation = parseCommandInvocationArguments(definition, segments, context, environment);
   const resolvedBody = renderTemplateVariables(definition.body, invocation);
 
-  const outputs: string[] = [];
-  const statements = context.parseScript(resolvedBody);
-  for (const statement of statements) {
-    const output = context.executeStatement(statement, environment);
-    if (output !== undefined) {
-      outputs.push(output);
-    }
-  }
+  const outputs = executeBodyStatements(resolvedBody, context, environment);
 
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 }
@@ -175,7 +169,7 @@ function parseCommandInvocationArguments(
 
 function validateExpression(source: string, argName: string, context: ShellCommandContext, environment: ShellEnvironment): void {
   try {
-    const statement = context.parseLine(`eval ${source}`);
+    const statement = context.parseLine(`eval ${source}`, environment);
     context.executeStatement(statement, environment);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

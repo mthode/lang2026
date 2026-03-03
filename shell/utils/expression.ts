@@ -3,15 +3,14 @@ import type { ShellEnvironment } from "../commands/types.js";
 
 export function evaluateShellExpression(
   expression: ExpressionNode,
-  environment: ShellEnvironment,
-  localVariables: Record<string, number> = {}
+  environment: ShellEnvironment
 ): number {
   if (expression.kind === "number") {
     return expression.value;
   }
 
   if (expression.kind === "identifier") {
-    const value = localVariables[expression.name] ?? environment.variables[expression.name];
+    const value = environment.localVariables[expression.name] ?? environment.variables[expression.name];
     if (value === undefined) {
       throw new Error(`Unknown identifier '${expression.name}' in expression`);
     }
@@ -19,7 +18,7 @@ export function evaluateShellExpression(
   }
 
   if (expression.kind === "prefix") {
-    const value = evaluateShellExpression(expression.right, environment, localVariables);
+    const value = evaluateShellExpression(expression.right, environment);
 
     if (expression.operator === "+") return value;
     if (expression.operator === "-") return -value;
@@ -28,8 +27,8 @@ export function evaluateShellExpression(
   }
 
   if (expression.kind === "binary") {
-    const left = evaluateShellExpression(expression.left, environment, localVariables);
-    const right = evaluateShellExpression(expression.right, environment, localVariables);
+    const left = evaluateShellExpression(expression.left, environment);
+    const right = evaluateShellExpression(expression.right, environment);
 
     if (expression.operator === "+") return left + right;
     if (expression.operator === "-") return left - right;
@@ -81,11 +80,10 @@ export function renderTemplateVariables(
 
 export function substituteStatementVariables(
   source: string,
-  environment: ShellEnvironment,
-  localVariables: Record<string, number> = {}
+  environment: ShellEnvironment
 ): string {
-  return source.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\b/g, (_match, name: string) => {
-    const local = localVariables[name];
+  const replaceSegment = (segment: string): string => segment.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\b/g, (_match, name: string) => {
+    const local = environment.localVariables[name];
     if (local !== undefined) {
       return String(local);
     }
@@ -97,4 +95,39 @@ export function substituteStatementVariables(
 
     return `$${name}`;
   });
+
+  let output = "";
+  let depth = 0;
+  let segmentStart = 0;
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (ch === "{") {
+      if (depth === 0) {
+        output += replaceSegment(source.slice(segmentStart, i));
+        segmentStart = i;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0) {
+          output += source.slice(segmentStart, i + 1);
+          segmentStart = i + 1;
+        }
+      }
+    }
+  }
+
+  if (segmentStart < source.length) {
+    output += depth === 0
+      ? replaceSegment(source.slice(segmentStart))
+      : source.slice(segmentStart);
+  }
+
+  return output;
 }

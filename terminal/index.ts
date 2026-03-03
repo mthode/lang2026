@@ -1,5 +1,5 @@
 import { ReplEngine } from "../repl/index.js";
-import { createShellEnvironment, formatShellPrompt } from "../shell/index.js";
+import { createShellEnvironment, createShellReplCallbacks, formatShellPrompt } from "../shell/index.js";
 import { executeNodeOsCommand, resolveNodeDirectory } from "./os-command.js";
 
 export interface TerminalIo {
@@ -14,7 +14,7 @@ export async function startTerminalRepl(io: TerminalIo): Promise<void> {
     executeOsCommand: (command, args) => executeNodeOsCommand(command, args, environment.currentDirectory),
     changeDirectory: (path, currentDirectory) => resolveNodeDirectory(path, currentDirectory)
   });
-  const engine = new ReplEngine(undefined, environment);
+  const engine = new ReplEngine(createShellReplCallbacks(environment));
 
   try {
     while (true) {

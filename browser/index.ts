@@ -1,4 +1,5 @@
 import { ReplEngine } from "../repl/index.js";
+import { createShellEnvironment, createShellReplCallbacks } from "../shell/index.js";
 
 export interface BrowserReplOptions {
   input: HTMLInputElement | HTMLTextAreaElement;
@@ -6,7 +7,8 @@ export interface BrowserReplOptions {
 }
 
 export function attachBrowserRepl(options: BrowserReplOptions): void {
-  const engine = new ReplEngine();
+  const environment = createShellEnvironment();
+  const engine = new ReplEngine(createShellReplCallbacks(environment));
 
   options.input.addEventListener("keydown", async (event) => {
     const keyboardEvent = event as KeyboardEvent;

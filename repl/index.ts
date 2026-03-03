@@ -1,62 +1,40 @@
 import { scan } from "../scanner/index.js";
-import {
-  createShellEnvironment,
-  executeShellCommand,
-  parseShellScript,
-  type ShellCommandNode,
-  type ShellStatementNode
-} from "../shell/index.js";
-import type { ShellEnvironment } from "../shell/commands/types.js";
 
-export interface ReplResult {
-  command?: ShellCommandNode;
+export interface ReplExecutionResult<TCommand = unknown> {
+  command?: TCommand;
   output?: string;
+}
+
+export interface ReplCallbacks<TCommand = unknown> {
+  execute(source: string): Promise<ReplExecutionResult<TCommand>> | ReplExecutionResult<TCommand>;
+  needsContinuation?(input: string): boolean;
+}
+
+export interface ReplResult<TCommand = unknown> extends ReplExecutionResult<TCommand> {
   pending: boolean;
 }
 
-export type ReplEvaluator = (
-  statement: ShellStatementNode,
-  environment: ShellEnvironment
-) => Promise<string | undefined> | string | undefined;
-
-export class ReplEngine {
+export class ReplEngine<TCommand = unknown> {
   private pendingInput = "";
-  private readonly environment: ShellEnvironment;
 
-  constructor(private readonly evaluator?: ReplEvaluator, environment: ShellEnvironment = createShellEnvironment()) {
-    this.environment = environment;
-  }
+  constructor(private readonly callbacks: ReplCallbacks<TCommand>) {}
 
-  async evaluate(line: string): Promise<ReplResult> {
+  async evaluate(line: string): Promise<ReplResult<TCommand>> {
     this.pendingInput = this.pendingInput.length > 0 ? `${this.pendingInput}\n${line}` : line;
 
-    if (needsContinuation(this.pendingInput)) {
+    const continuationChecker = this.callbacks.needsContinuation ?? needsContinuation;
+    if (continuationChecker(this.pendingInput)) {
       return { pending: true };
     }
 
     const source = this.pendingInput;
     this.pendingInput = "";
 
-    const statements = parseShellScript(source);
-    let lastCommand: ShellCommandNode | undefined;
-    const outputs: string[] = [];
-
-    for (const statement of statements) {
-      const output = this.evaluator
-        ? await evaluateWithCustomEvaluator(statement, this.evaluator, this.environment)
-        : executeShellCommand(statement, this.environment);
-      if (output !== undefined) {
-        outputs.push(output);
-      }
-
-      if (statement.kind === "command") {
-        lastCommand = statement;
-      }
-    }
+    const result = await this.callbacks.execute(source);
 
     return {
-      command: lastCommand,
-      output: outputs.length > 0 ? outputs.join("\n") : undefined,
+      command: result.command,
+      output: result.output,
       pending: false
     };
   }
@@ -80,12 +58,4 @@ function needsContinuation(input: string): boolean {
   }
 
   return bracketBalance > 0;
-}
-
-async function evaluateWithCustomEvaluator(
-  statement: ShellStatementNode,
-  evaluator: ReplEvaluator,
-  environment: ShellEnvironment
-): Promise<string | undefined> {
-  return evaluator(statement, environment);
 }

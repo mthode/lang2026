@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createShellEnvironment, executeShellCommand, parseShellLine } from "../shell/index.js";
+import { createShellEnvironment, executeShellCommand, executeShellSource, parseShellLine } from "../shell/index.js";
 
 describe("shell eval command", () => {
   it("parses eval expression with spaces as a single argument", () => {
@@ -173,6 +173,24 @@ describe("shell eval command", () => {
     const environment = createShellEnvironment();
     const statement = parseShellLine("for 1 from 1 to 3 do { echo 1 }");
     expect(() => executeShellCommand(statement, environment)).toThrowError("iterator must be an identifier");
+  });
+
+  it("keeps global variables accessible outside command bodies", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("i = 42"), environment);
+    executeShellCommand(parseShellLine("for i from 1 to 2 do { echo $i }"), environment);
+
+    const output = executeShellCommand(parseShellLine("eval i"), environment);
+    expect(output).toBe("42");
+  });
+
+  it("supports top-level variable substitution during shell source execution", () => {
+    const environment = createShellEnvironment();
+
+    const result = executeShellSource("x = 5\necho $x", environment);
+
+    expect(result.output).toBe("5");
   });
 
   it("routes unknown commands to OS executor with raw arguments", () => {

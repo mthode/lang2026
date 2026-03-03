@@ -14,7 +14,7 @@ export const executeIfCommand: ShellCommandExecutor = (command, context, environ
     return undefined;
   }
 
-  const outputs = executeBodyStatements(selectedBlock.content, context, environment, {}, selectedBlock.scope);
+  const outputs = executeBodyStatements(selectedBlock.content, context, environment, selectedBlock.scope);
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 };
 

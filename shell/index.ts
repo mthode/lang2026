@@ -1,4 +1,6 @@
 import { createParser, type CommandNode, type ParserConfig, type ParserScope, type StatementNode } from "../parser/index.js";
+import { splitLogicalLinesWithMetadata } from "../scanner/index.js";
+import type { ReplCallbacks } from "../repl/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
 import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
@@ -8,7 +10,7 @@ import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
-import { evaluateShellExpression } from "./utils/expression.js";
+import { evaluateShellExpression, substituteStatementVariables } from "./utils/expression.js";
 import { getCommandArgumentSource } from "../parser/index.js";
 export { evaluateShellExpression } from "./utils/expression.js";
 
@@ -96,7 +98,8 @@ const commandExecutors: Record<string, ShellCommandExecutor> = {
 
 const commandContext: ShellCommandContext = {
   parseScript: (source, scope) => parseShellScript(source, scope),
-  parseLine: (source, startLine, scope) => parseShellLine(source, startLine, scope),
+  parseLine: (source, environment, startLine, scope) =>
+    parseShellLine(substituteStatementVariables(source, environment), startLine, scope),
   executeStatement: (statement, environment) => executeShellCommand(statement, environment)
 };
 
@@ -106,6 +109,40 @@ export const parseShellLine = (source: string, startLine?: number, scope?: Parse
   shellParser.parseLine(source, startLine, scope);
 export const parseShellScript = (source: string, scope?: ParserScope) => shellParser.parseScript(source, scope);
 export const formatShellPrompt = (environment: ShellEnvironment): string => `${environment.currentDirectory}> `;
+
+export interface ShellSourceExecutionResult {
+  command?: ShellCommandNode;
+  output?: string;
+}
+
+export function createShellReplCallbacks(environment: ShellEnvironment): ReplCallbacks<ShellCommandNode> {
+  return {
+    execute: (source) => executeShellSource(source, environment)
+  };
+}
+
+export function executeShellSource(source: string, environment: ShellEnvironment, scope?: ParserScope): ShellSourceExecutionResult {
+  const statements = splitLogicalLinesWithMetadata(source);
+  const outputs: string[] = [];
+  let lastCommand: ShellCommandNode | undefined;
+
+  for (const line of statements) {
+    const parsed = parseShellLine(substituteStatementVariables(line.content, environment), line.startLine, scope);
+    const output = executeShellCommand(parsed, environment);
+    if (output !== undefined) {
+      outputs.push(output);
+    }
+
+    if (parsed.kind === "command") {
+      lastCommand = parsed;
+    }
+  }
+
+  return {
+    command: lastCommand,
+    output: outputs.length > 0 ? outputs.join("\n") : undefined
+  };
+}
 
 export function executeShellCommand(statement: ShellStatementNode, environment: ShellEnvironment): string | undefined {
   if (statement.kind === "assignment") {

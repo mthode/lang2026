@@ -1,6 +1,7 @@
 import type { ExpressionNode, NestedBlockNode } from "../../parser/index.js";
 import { executeBodyStatements } from "../utils/body.js";
 import { evaluateShellExpression } from "../utils/expression.js";
+import { withLocalVariables } from "../utils/local-scope.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
@@ -17,12 +18,15 @@ export const executeWhileCommand: ShellCommandExecutor = (command, context, envi
       throw new Error(`'while' exceeded max iterations (${MAX_LOOP_ITERATIONS})`);
     }
 
-    const conditionValue = evaluateShellExpression(condition, environment, { loop });
+    const conditionValue = withLocalVariables(environment, { loop }, () => evaluateShellExpression(condition, environment));
     if (conditionValue === 0) {
       break;
     }
 
-    outputs.push(...executeBodyStatements(body.content, context, environment, { loop }, body.scope));
+    const bodyOutputs = withLocalVariables(environment, { loop }, () =>
+      executeBodyStatements(body.content, context, environment, body.scope)
+    );
+    outputs.push(...bodyOutputs);
 
     loop += 1;
   }

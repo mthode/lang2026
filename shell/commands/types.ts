@@ -2,6 +2,7 @@ import type { CommandNode, ParserScope, StatementNode } from "../../parser/index
 
 export interface ShellEnvironment {
   variables: Record<string, number>;
+  localVariables: Record<string, number>;
   functions: Map<string, UserFunctionDefinition>;
   currentDirectory: string;
   executeOsCommand(command: string, args: string[]): string | undefined;
@@ -35,6 +36,7 @@ export interface UserFunctionDefinition {
 export function createShellEnvironment(options: ShellEnvironmentOptions = {}): ShellEnvironment {
   return {
     variables: {},
+    localVariables: {},
     functions: new Map(),
     currentDirectory: options.currentDirectory ?? "/",
     executeOsCommand: options.executeOsCommand ?? (() => {
@@ -48,7 +50,7 @@ export function createShellEnvironment(options: ShellEnvironmentOptions = {}): S
 
 export interface ShellCommandContext {
   parseScript(source: string, scope?: ParserScope): StatementNode[];
-  parseLine(source: string, startLine?: number, scope?: ParserScope): StatementNode;
+  parseLine(source: string, environment: ShellEnvironment, startLine?: number, scope?: ParserScope): StatementNode;
   executeStatement(statement: StatementNode, environment: ShellEnvironment): string | undefined;
 }
 
