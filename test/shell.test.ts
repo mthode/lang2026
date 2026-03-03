@@ -174,4 +174,39 @@ describe("shell eval command", () => {
     const statement = parseShellLine("for 1 from 1 to 3 do { echo 1 }");
     expect(() => executeShellCommand(statement, environment)).toThrowError("iterator must be an identifier");
   });
+
+  it("routes unknown commands to OS executor with raw arguments", () => {
+    const environment = createShellEnvironment({
+      executeOsCommand: (command, args) => `${command}:${args.join("|")}`
+    });
+
+    const statement = parseShellLine("external 1 + 2 \"hello world\"");
+    const output = executeShellCommand(statement, environment);
+
+    expect(output).toBe("external:1|+|2|hello world");
+  });
+
+  it("returns web-specific error when OS commands are unavailable", () => {
+    const environment = createShellEnvironment();
+    const statement = parseShellLine("external-test anything");
+
+    expect(() => executeShellCommand(statement, environment)).toThrowError("OS commands are not available on the web");
+  });
+
+  it("cd updates current directory using environment resolver", () => {
+    const environment = createShellEnvironment({
+      currentDirectory: "/tmp",
+      changeDirectory: (path, current) => `${current}/${path}`.replace(/\/+/g, "/")
+    });
+
+    const statement = parseShellLine("cd projects");
+    const output = executeShellCommand(statement, environment);
+
+    expect(output).toBeUndefined();
+    expect(environment.currentDirectory).toBe("/tmp/projects");
+  });
+
+  it("cd validates required path argument", () => {
+    expect(() => parseShellLine("cd")).toThrowError("Missing required argument 'path'");
+  });
 });

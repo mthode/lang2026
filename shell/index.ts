@@ -2,11 +2,14 @@ import { createParser, type CommandNode, type ParserConfig, type ParserScope, ty
 import { executeEchoCommand } from "./commands/echo.js";
 import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
+import { executeCdCommand } from "./commands/cd.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
+import { splitArgumentSegments } from "./utils/arguments.js";
 import { evaluateShellExpression } from "./utils/expression.js";
+import { getCommandArgumentSource } from "../parser/index.js";
 export { evaluateShellExpression } from "./utils/expression.js";
 
 const shellParserConfig: ParserConfig = {
@@ -35,10 +38,13 @@ const shellParserConfig: ParserConfig = {
   },
   allowAssignmentStatements: true,
   defaultCommand: {
-    argumentKind: "expression",
-    parseNamedArguments: true
+    argumentKind: "raw",
+    parseNamedArguments: false
   },
   commands: {
+    cd: {
+      arguments: [{ name: "path", kind: "raw", positional: true, vararg: true }]
+    },
     cmd: {
       arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
     },
@@ -79,6 +85,7 @@ const shellParserConfig: ParserConfig = {
 const shellParser = createParser(shellParserConfig);
 
 const commandExecutors: Record<string, ShellCommandExecutor> = {
+  cd: executeCdCommand,
   cmd: executeCmdCommand,
   eval: executeEvalCommand,
   echo: executeEchoCommand,
@@ -98,6 +105,7 @@ export type ShellStatementNode = StatementNode;
 export const parseShellLine = (source: string, startLine?: number, scope?: ParserScope) =>
   shellParser.parseLine(source, startLine, scope);
 export const parseShellScript = (source: string, scope?: ParserScope) => shellParser.parseScript(source, scope);
+export const formatShellPrompt = (environment: ShellEnvironment): string => `${environment.currentDirectory}> `;
 
 export function executeShellCommand(statement: ShellStatementNode, environment: ShellEnvironment): string | undefined {
   if (statement.kind === "assignment") {
@@ -111,7 +119,13 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
     return commandExecutor(statement, commandContext, environment);
   }
 
-  return executeUserCommand(statement.name, statement.raw, commandContext, environment);
+  if (environment.functions.has(statement.name)) {
+    return executeUserCommand(statement.name, statement.raw, commandContext, environment);
+  }
+
+  const remainder = getCommandArgumentSource(statement.raw);
+  const args = splitArgumentSegments(remainder, { decodeStringLiterals: true });
+  return environment.executeOsCommand(statement.name, args);
 }
 
 export interface ShellRuntime {

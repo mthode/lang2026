@@ -13,6 +13,37 @@ This directory defines the shell language configuration and command execution.
 
 ## Supported commands
 
+### Prompt
+
+In the terminal runtime, the prompt includes the current working directory, for example:
+
+- `/home/user/project> `
+
+The browser runtime does not include this prompt feature.
+
+### External OS commands
+
+If a command is not implemented by the shell (and is not a user-defined `cmd` command), the runtime tries to execute it using the operating system.
+
+Behavior:
+
+- Arguments are forwarded as raw strings.
+- Expressions are not evaluated for external commands.
+- In the browser runtime, this throws: `OS commands are not available on the web`.
+
+### `cd`
+
+Changes the current working directory used by the shell and external OS command execution.
+
+Syntax:
+
+- `cd PATH`
+
+Examples:
+
+- `cd ..`
+- `cd /tmp`
+
 ### `eval`
 
 Evaluates one expression and returns the numeric result as text.

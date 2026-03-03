@@ -1,5 +1,5 @@
 import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
-import { scan, type Token } from "../../scanner/index.js";
+import { splitArgumentSegments } from "../utils/arguments.js";
 import { renderTemplateVariables } from "../utils/expression.js";
 import type {
   ShellCommandContext,
@@ -181,38 +181,6 @@ function validateExpression(source: string, argName: string, context: ShellComma
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid expression for argument '${argName}': ${message}`);
   }
-}
-
-function splitArgumentSegments(source: string): string[] {
-  if (source.trim().length === 0) {
-    return [];
-  }
-
-  const tokens = scan(source);
-  const segments: string[] = [];
-  let current: Token[] = [];
-  let depth = 0;
-
-  for (const token of tokens) {
-    if (token.value === "(" || token.value === "[" || token.value === "{") depth += 1;
-    if (token.value === ")" || token.value === "]" || token.value === "}") depth = Math.max(0, depth - 1);
-
-    if (depth === 0 && (token.type === "whitespace" || token.type === "newline" || token.type === "comment")) {
-      if (current.length > 0) {
-        segments.push(current.map((t) => t.value).join(""));
-        current = [];
-      }
-      continue;
-    }
-
-    current.push(token);
-  }
-
-  if (current.length > 0) {
-    segments.push(current.map((t) => t.value).join(""));
-  }
-
-  return segments;
 }
 
 function readRawVararg(value: unknown): string[] {
