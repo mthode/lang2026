@@ -32,4 +32,13 @@ describe("scripting", () => {
 
     expect(normalizeOutput(output)).toBe("0\n1\n2\n1\n2\n3");
   });
+
+  it("runs recursive fibonacci command definitions from a multiline .script file", async () => {
+    let output = "";
+    await runScriptFile("test/scripts/fibonacci.script", (text) => {
+      output += text;
+    });
+
+    expect(normalizeOutput(output)).toBe("42\n0\n1\n1\n2\n3\n5");
+  });
 });

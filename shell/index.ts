@@ -1,8 +1,8 @@
-import { createParser, type CommandNode, type ParserConfig, type StatementNode } from "../parser/index.js";
+import { createParser, type CommandNode, type ParserConfig, type ParserScope, type StatementNode } from "../parser/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
 import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
-import { executeFuncCommand, executeUserFunction } from "./commands/func.js";
+import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
@@ -39,7 +39,7 @@ const shellParserConfig: ParserConfig = {
     parseNamedArguments: true
   },
   commands: {
-    func: {
+    cmd: {
       arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
     },
     if: {
@@ -79,7 +79,7 @@ const shellParserConfig: ParserConfig = {
 const shellParser = createParser(shellParserConfig);
 
 const commandExecutors: Record<string, ShellCommandExecutor> = {
-  func: executeFuncCommand,
+  cmd: executeCmdCommand,
   eval: executeEvalCommand,
   echo: executeEchoCommand,
   if: executeIfCommand,
@@ -88,15 +88,16 @@ const commandExecutors: Record<string, ShellCommandExecutor> = {
 };
 
 const commandContext: ShellCommandContext = {
-  parseScript: (source) => parseShellScript(source),
-  parseLine: (source) => parseShellLine(source),
+  parseScript: (source, scope) => parseShellScript(source, scope),
+  parseLine: (source, startLine, scope) => parseShellLine(source, startLine, scope),
   executeStatement: (statement, environment) => executeShellCommand(statement, environment)
 };
 
 export type ShellCommandNode = CommandNode;
 export type ShellStatementNode = StatementNode;
-export const parseShellLine = shellParser.parseLine;
-export const parseShellScript = shellParser.parseScript;
+export const parseShellLine = (source: string, startLine?: number, scope?: ParserScope) =>
+  shellParser.parseLine(source, startLine, scope);
+export const parseShellScript = (source: string, scope?: ParserScope) => shellParser.parseScript(source, scope);
 
 export function executeShellCommand(statement: ShellStatementNode, environment: ShellEnvironment): string | undefined {
   if (statement.kind === "assignment") {
@@ -110,7 +111,7 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
     return commandExecutor(statement, commandContext, environment);
   }
 
-  return executeUserFunction(statement.name, statement.raw, commandContext, environment);
+  return executeUserCommand(statement.name, statement.raw, commandContext, environment);
 }
 
 export interface ShellRuntime {

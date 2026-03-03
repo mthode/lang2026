@@ -22,7 +22,7 @@ export const executeWhileCommand: ShellCommandExecutor = (command, context, envi
       break;
     }
 
-    outputs.push(...executeBodyStatements(body.content, context, environment, { loop }));
+    outputs.push(...executeBodyStatements(body.content, context, environment, { loop }, body.scope));
 
     loop += 1;
   }

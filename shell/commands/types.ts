@@ -1,4 +1,4 @@
-import type { CommandNode, StatementNode } from "../../parser/index.js";
+import type { CommandNode, ParserScope, StatementNode } from "../../parser/index.js";
 
 export interface ShellEnvironment {
   variables: Record<string, number>;
@@ -31,8 +31,8 @@ export function createShellEnvironment(): ShellEnvironment {
 }
 
 export interface ShellCommandContext {
-  parseScript(source: string): StatementNode[];
-  parseLine(source: string): StatementNode;
+  parseScript(source: string, scope?: ParserScope): StatementNode[];
+  parseLine(source: string, startLine?: number, scope?: ParserScope): StatementNode;
   executeStatement(statement: StatementNode, environment: ShellEnvironment): string | undefined;
 }
 

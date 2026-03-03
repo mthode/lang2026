@@ -16,6 +16,11 @@ export interface Token {
   offset: number;
 }
 
+export interface LogicalLine {
+  content: string;
+  startLine: number;
+}
+
 const delimiterChars = new Set(["(", ")", "[", "]", "{", "}", ",", ".", ";"]);
 const operatorChars = new Set(["+", "-", "*", "/", "%", "=", "!", "<", ">", "&", "|", "^", "~", "?", ":"]);
 
@@ -204,11 +209,16 @@ export function scan(input: string): Token[] {
 }
 
 export function splitLogicalLines(input: string): string[] {
+  return splitLogicalLinesWithMetadata(input).map((line) => line.content);
+}
+
+export function splitLogicalLinesWithMetadata(input: string): LogicalLine[] {
   const lines = input.split("\n");
-  const logicalLines: string[] = [];
+  const logicalLines: LogicalLine[] = [];
 
   let current = "";
   let bracketBalance = 0;
+  let logicalStartLine = 1;
 
   const updateBalance = (lineText: string): void => {
     for (const ch of lineText) {
@@ -235,14 +245,15 @@ export function splitLogicalLines(input: string): string[] {
     }
 
     if (current.trim().length > 0) {
-      logicalLines.push(current);
+      logicalLines.push({ content: current, startLine: logicalStartLine });
     }
 
     current = "";
+    logicalStartLine = idx + 2;
   }
 
   if (current.trim().length > 0) {
-    logicalLines.push(current);
+    logicalLines.push({ content: current, startLine: logicalStartLine });
   }
 
   return logicalLines;

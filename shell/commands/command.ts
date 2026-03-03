@@ -1,22 +1,27 @@
 import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
 import { scan, type Token } from "../../scanner/index.js";
 import { renderTemplateVariables } from "../utils/expression.js";
-import type { ShellCommandContext, ShellCommandExecutor, ShellEnvironment, UserFunctionDefinition } from "./types.js";
+import type {
+  ShellCommandContext,
+  ShellCommandExecutor,
+  ShellEnvironment,
+  UserFunctionDefinition as UserCommandDefinition
+} from "./types.js";
 
-type FunctionArgDeclaration = UserFunctionDefinition["declarations"][number];
+type CommandArgDeclaration = UserCommandDefinition["declarations"][number];
 
-export const executeFuncCommand: ShellCommandExecutor = (command, _context, environment) => {
-    const declarationSource = readRawVararg(command.args.declaration).join(" ").trim();
-    if (declarationSource.length === 0) {
-      throw new Error("'func' requires: func FUNCTION_NAME ARG_DECLS { COMMANDS }");
-    }
+export const executeCmdCommand: ShellCommandExecutor = (command, _context, environment) => {
+  const declarationSource = readRawVararg(command.args.declaration).join(" ").trim();
+  if (declarationSource.length === 0) {
+    throw new Error("'cmd' requires: cmd COMMAND_NAME ARG_DECLS { COMMANDS }");
+  }
 
-    const definition = parseFunctionDefinition(declarationSource);
-    environment.functions.set(definition.name, definition);
-    return undefined;
+  const definition = parseCommandDefinition(declarationSource);
+  environment.functions.set(definition.name, definition);
+  return undefined;
 };
 
-export function executeUserFunction(
+export function executeUserCommand(
   commandName: string,
   statementRaw: string,
   context: ShellCommandContext,
@@ -29,7 +34,7 @@ export function executeUserFunction(
 
   const remainder = getCommandArgumentSource(statementRaw);
   const segments = splitArgumentSegments(remainder);
-  const invocation = parseInvocationArguments(definition, segments, context, environment);
+  const invocation = parseCommandInvocationArguments(definition, segments, context, environment);
   const resolvedBody = renderTemplateVariables(definition.body, invocation);
 
   const outputs: string[] = [];
@@ -44,25 +49,25 @@ export function executeUserFunction(
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 }
 
-function parseFunctionDefinition(source: string): UserFunctionDefinition {
+function parseCommandDefinition(source: string): UserCommandDefinition {
   const block = extractNestedBlock(source, 0);
   const header = source.slice(0, block.openIndex).trim();
   const trailing = source.slice(block.closeIndex + 1).trim();
   if (trailing.length > 0) {
-    throw new Error("Unexpected content after function body");
+    throw new Error("Unexpected content after command body");
   }
 
   const tokens = header.split(/\s+/).filter((token) => token.length > 0);
   if (tokens.length === 0) {
-    throw new Error("Missing function name");
+    throw new Error("Missing command name");
   }
 
   const [name, ...argTokens] = tokens;
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`Invalid function name '${name}'`);
+    throw new Error(`Invalid command name '${name}'`);
   }
 
-  const declarations = argTokens.map(parseFunctionArgToken);
+  const declarations = argTokens.map(parseCommandArgToken);
   return {
     name,
     declarations,
@@ -70,7 +75,7 @@ function parseFunctionDefinition(source: string): UserFunctionDefinition {
   };
 }
 
-function parseFunctionArgToken(token: string): FunctionArgDeclaration {
+function parseCommandArgToken(token: string): CommandArgDeclaration {
   const optional = token.startsWith("[") && token.endsWith("]");
   const inner = optional ? token.slice(1, -1) : token;
 
@@ -108,8 +113,8 @@ function parseFunctionArgToken(token: string): FunctionArgDeclaration {
   };
 }
 
-function parseInvocationArguments(
-  definition: UserFunctionDefinition,
+function parseCommandInvocationArguments(
+  definition: UserCommandDefinition,
   segments: string[],
   context: ShellCommandContext,
   environment: ShellEnvironment
@@ -162,7 +167,7 @@ function parseInvocationArguments(
   }
 
   if (cursor < segments.length) {
-    throw new Error("Unexpected extra arguments when calling function");
+    throw new Error("Unexpected extra arguments when calling command");
   }
 
   return args;

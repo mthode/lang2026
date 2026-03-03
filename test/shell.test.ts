@@ -107,7 +107,7 @@ describe("shell eval command", () => {
 
   it("defines and invokes user commands", () => {
     const environment = createShellEnvironment();
-    const define = parseShellLine("func add a b { eval $a + $b }");
+    const define = parseShellLine("cmd add a b { eval $a + $b }");
     const defineOutput = executeShellCommand(define, environment);
     expect(defineOutput).toBeUndefined();
 
@@ -118,7 +118,7 @@ describe("shell eval command", () => {
 
   it("supports optional positional function arguments", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("func show a [b] { echo $a }"), environment);
+    executeShellCommand(parseShellLine("cmd show a [b] { echo $a }"), environment);
     const call = parseShellLine("show 10");
     const callOutput = executeShellCommand(call, environment);
     expect(callOutput).toBe("10");
@@ -126,7 +126,7 @@ describe("shell eval command", () => {
 
   it("supports named function args and flags", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("func cfg flag:0 x:1 y:2 { echo $flag $x $y }"), environment);
+    executeShellCommand(parseShellLine("cmd cfg flag:0 x:1 y:2 { echo $flag $x $y }"), environment);
     const call = parseShellLine("cfg flag x 7 y 8 9");
     const callOutput = executeShellCommand(call, environment);
     expect(callOutput).toBe("true 7 8 9");
@@ -134,7 +134,7 @@ describe("shell eval command", () => {
 
   it("validates named argument arity in function calls", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("func cfg2 x:2 { echo $x }"), environment);
+    executeShellCommand(parseShellLine("cmd cfg2 x:2 { echo $x }"), environment);
     expect(() => executeShellCommand(parseShellLine("cfg2 x 1"), environment)).toThrowError("expects 2 values");
   });
 

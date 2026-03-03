@@ -1,0 +1,24 @@
+cmd banner msg {
+  echo $msg
+}
+
+cmd fib_pair a b remaining {
+  if $remaining then {
+    echo $a
+    next = $a + $b
+    fib_pair $b $next ($remaining - 1)
+  } else {
+    echo $a
+  }
+}
+
+cmd fibonacci n {
+  if $n then {
+    banner 42
+    fib_pair 0 1 ($n - 1)
+  } else {
+    echo 0
+  }
+}
+
+fibonacci 6

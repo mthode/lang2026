@@ -1,20 +1,31 @@
-export * from "./expression.js";
-export * from "./command.js";
-
-/*
 import { scan, splitLogicalLinesWithMetadata, type Token } from "../scanner/index.js";
+import {
+  applyExpressionOperatorOverrides,
+  compactTokens,
+  createParserError,
+  isIgnorable,
+  parseExpressionFromTokens,
+  withParserErrorContext,
+  type ExpressionNode,
+  type ExpressionOperatorOverrides,
+  type ExpressionParserConfig,
+  type InfixOperatorDefinition,
+  type PrefixOperatorDefinition
+} from "./expression.js";
 
-export type ExpressionNode =
-  | { kind: "identifier"; name: string }
-  | { kind: "number"; value: number; raw: string }
-  | { kind: "string"; value: string; raw: string }
-  | { kind: "prefix"; operator: string; right: ExpressionNode }
-  | { kind: "binary"; operator: string; left: ExpressionNode; right: ExpressionNode }
-  | { kind: "call"; callee: ExpressionNode; args: ExpressionNode[] };
+export interface ParserScope {
+  prefixOperators?: Record<string, PrefixOperatorDefinition>;
+  infixOperators?: Record<string, InfixOperatorDefinition>;
+  allowAssignmentStatements?: boolean;
+  commands?: Record<string, CommandDefinition>;
+  strictCommands?: boolean;
+  defaultCommand?: CommandDefinition;
+}
 
 export interface NestedBlockNode {
   kind: "nested-block";
   content: string;
+  scope?: ParserScope;
 }
 
 export type ArgumentValue = ExpressionNode | string | NestedBlockNode;
@@ -52,20 +63,11 @@ export interface CommandArgumentDefinition {
   positional?: boolean;
   optional?: boolean;
   vararg?: boolean;
+  expressionOperators?: ExpressionOperatorOverrides;
+  nestedScope?: ParserScope;
 }
 
-export interface PrefixOperatorDefinition {
-  precedence: number;
-}
-
-export interface InfixOperatorDefinition {
-  precedence: number;
-  associativity?: "left" | "right";
-}
-
-export interface ParserConfig {
-  prefixOperators: Record<string, PrefixOperatorDefinition>;
-  infixOperators: Record<string, InfixOperatorDefinition>;
+export interface ParserConfig extends ExpressionParserConfig {
   allowAssignmentStatements?: boolean;
   commands?: Record<string, CommandDefinition>;
   strictCommands?: boolean;
@@ -73,68 +75,17 @@ export interface ParserConfig {
 }
 
 export interface GenericParser {
-  parseLine(line: string, startLine?: number): StatementNode;
-  parseScript(input: string): StatementNode[];
+  parseLine(line: string, startLine?: number, scope?: ParserScope): StatementNode;
+  parseScript(input: string, scope?: ParserScope): StatementNode[];
 }
 
-interface ParserState {
-  tokens: Token[];
-  index: number;
-  config: ParserConfig;
-  lineOffset: number;
-}
-
-function hasLinePrefix(message: string): boolean {
-  return /(^|:\s)Line \d+(, column \d+)?:/.test(message);
-}
-
-function formatParserError(message: string, line: number, column?: number): Error {
-  if (column !== undefined) {
-    return new Error(`Line ${line}, column ${column}: ${message}`);
-  }
-  return new Error(`Line ${line}: ${message}`);
-}
-
-function tokenAbsoluteLine(token: Token, lineOffset: number): number {
-  return token.line + lineOffset - 1;
-}
-
-function createParserError(message: string, lineOffset: number, token?: Token, fallbackLine = lineOffset): Error {
-  if (token) {
-    return formatParserError(message, tokenAbsoluteLine(token, lineOffset), token.column);
-  }
-  return formatParserError(message, fallbackLine);
-}
-
-function withParserErrorContext<T>(lineOffset: number, fallbackToken: Token | undefined, fn: () => T): T {
-  try {
-    return fn();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (hasLinePrefix(message)) {
-      throw error;
-    }
-
-    throw createParserError(message, lineOffset, fallbackToken, lineOffset);
-  }
-}
-
-function isIgnorable(token: Token): boolean {
-  return token.type === "whitespace" || token.type === "comment" || token.type === "newline";
-}
-
-function compactTokens(tokens: Token[]): Token[] {
-  return tokens.filter((t) => !isIgnorable(t));
-}
-
-function peek(state: ParserState): Token | undefined {
-  return state.tokens[state.index];
-}
-
-function consume(state: ParserState): Token | undefined {
-  const token = state.tokens[state.index];
-  state.index += 1;
-  return token;
+interface ResolvedParserScope {
+  prefixOperators: Record<string, PrefixOperatorDefinition>;
+  infixOperators: Record<string, InfixOperatorDefinition>;
+  allowAssignmentStatements: boolean;
+  commands?: Record<string, CommandDefinition>;
+  strictCommands: boolean;
+  defaultCommand?: CommandDefinition;
 }
 
 function normalizeCommandDefinition(definition?: CommandDefinition): Required<CommandDefinition> {
@@ -147,106 +98,66 @@ function normalizeCommandDefinition(definition?: CommandDefinition): Required<Co
   };
 }
 
-function resolveCommandDefinition(config: ParserConfig, commandName: string): Required<CommandDefinition> {
-  const commandDefinition = config.commands?.[commandName];
+function resolveScopeFromConfig(config: ParserConfig): ResolvedParserScope {
+  return {
+    prefixOperators: { ...config.prefixOperators },
+    infixOperators: { ...config.infixOperators },
+    allowAssignmentStatements: config.allowAssignmentStatements ?? false,
+    commands: config.commands,
+    strictCommands: config.strictCommands ?? false,
+    defaultCommand: config.defaultCommand
+  };
+}
 
-  if (!commandDefinition && config.strictCommands) {
+function mergeScope(base: ResolvedParserScope, override?: ParserScope): ResolvedParserScope {
+  if (!override) {
+    return base;
+  }
+
+  return {
+    prefixOperators: {
+      ...base.prefixOperators,
+      ...(override.prefixOperators ?? {})
+    },
+    infixOperators: {
+      ...base.infixOperators,
+      ...(override.infixOperators ?? {})
+    },
+    allowAssignmentStatements: override.allowAssignmentStatements ?? base.allowAssignmentStatements,
+    commands: override.commands ?? base.commands,
+    strictCommands: override.strictCommands ?? base.strictCommands,
+    defaultCommand: override.defaultCommand ?? base.defaultCommand
+  };
+}
+
+function toParserScope(scope: ResolvedParserScope): ParserScope {
+  return {
+    prefixOperators: scope.prefixOperators,
+    infixOperators: scope.infixOperators,
+    allowAssignmentStatements: scope.allowAssignmentStatements,
+    commands: scope.commands,
+    strictCommands: scope.strictCommands,
+    defaultCommand: scope.defaultCommand
+  };
+}
+
+function resolveCommandDefinition(scope: ResolvedParserScope, commandName: string): Required<CommandDefinition> {
+  const commandDefinition = scope.commands?.[commandName];
+
+  if (!commandDefinition && scope.strictCommands) {
     throw new Error(`Unknown command '${commandName}'`);
   }
 
-  return normalizeCommandDefinition(commandDefinition ?? config.defaultCommand);
-}
-
-function parsePrimary(state: ParserState): ExpressionNode {
-  const token = consume(state);
-
-  if (!token) {
-    throw createParserError("Unexpected end of expression", state.lineOffset);
-  }
-
-  if (token.type === "identifier") {
-    let node: ExpressionNode = { kind: "identifier", name: token.value };
-
-    while (peek(state)?.value === "(") {
-      consume(state);
-      const args: ExpressionNode[] = [];
-
-      if (peek(state)?.value !== ")") {
-        while (true) {
-          args.push(parseExpression(state));
-          if (peek(state)?.value === ",") {
-            consume(state);
-            continue;
-          }
-          break;
-        }
-      }
-
-      if (peek(state)?.value !== ")") {
-        throw createParserError("Expected ')' in call expression", state.lineOffset, peek(state));
-      }
-      consume(state);
-      node = { kind: "call", callee: node, args };
-    }
-
-    return node;
-  }
-
-  if (token.type === "number") {
-    return { kind: "number", value: Number(token.value.replaceAll("_", "")), raw: token.value };
-  }
-
-  if (token.type === "string") {
-    const unquoted = token.value.slice(1, Math.max(1, token.value.length - 1));
-    return { kind: "string", value: unquoted, raw: token.value };
-  }
-
-  if (token.value === "(") {
-    const expr = parseExpression(state);
-    if (peek(state)?.value !== ")") {
-      throw createParserError("Expected ')' after grouped expression", state.lineOffset, peek(state));
-    }
-    consume(state);
-    return expr;
-  }
-
-  const prefixOperator = state.config.prefixOperators[token.value];
-  if (prefixOperator) {
-    const right = parseExpression(state, prefixOperator.precedence);
-    return { kind: "prefix", operator: token.value, right };
-  }
-
-  throw createParserError(`Unexpected token '${token.value}'`, state.lineOffset, token);
-}
-
-function parseExpression(state: ParserState, minPrecedence = 0): ExpressionNode {
-  let left = parsePrimary(state);
-
-  while (true) {
-    const token = peek(state);
-    if (!token) break;
-
-    const infixOperator = state.config.infixOperators[token.value];
-    if (!infixOperator || infixOperator.precedence < minPrecedence) {
-      break;
-    }
-
-    const operator = token.value;
-    consume(state);
-
-    const nextMinPrecedence = infixOperator.associativity === "right" ? infixOperator.precedence : infixOperator.precedence + 1;
-    const right = parseExpression(state, nextMinPrecedence);
-    left = { kind: "binary", operator, left, right };
-  }
-
-  return left;
+  return normalizeCommandDefinition(commandDefinition ?? scope.defaultCommand);
 }
 
 function parseArgumentValue(
   tokens: Token[],
-  config: ParserConfig,
+  expressionConfig: ExpressionParserConfig,
   commandDefinition: Required<CommandDefinition>,
-  lineOffset = 1
+  lineOffset = 1,
+  argumentDefinition?: CommandArgumentDefinition,
+  nestedScope?: ParserScope
 ): ArgumentValue {
   if (commandDefinition.argumentKind === "nested-block") {
     const text = tokens.map((token) => token.value).join("");
@@ -255,7 +166,11 @@ function parseArgumentValue(
     if (trailing.length > 0) {
       throw new Error("Unexpected content after nested block");
     }
-    return { kind: "nested-block", content: block.content };
+    return {
+      kind: "nested-block",
+      content: block.content,
+      scope: nestedScope ?? argumentDefinition?.nestedScope
+    };
   }
 
   if (commandDefinition.argumentKind === "raw") {
@@ -267,16 +182,18 @@ function parseArgumentValue(
     throw new Error("Expected expression");
   }
 
+  const effectiveExpressionConfig = applyExpressionOperatorOverrides(expressionConfig, argumentDefinition?.expressionOperators);
+
   if (
     commandDefinition.parseNamedArguments &&
     compact.length >= 2 &&
     compact[0]?.type === "identifier" &&
     !((compact[1]?.type === "operator" && compact[1]?.value === "=") || compact[1]?.type === "delimiter")
   ) {
-    return parseExpressionFromTokens(compact.slice(1), config, lineOffset);
+    return parseExpressionFromTokens(compact.slice(1), effectiveExpressionConfig, lineOffset);
   }
 
-  return parseExpressionFromTokens(compact, config, lineOffset);
+  return parseExpressionFromTokens(compact, effectiveExpressionConfig, lineOffset);
 }
 
 function skipIgnorableTokens(tokens: Token[], from: number): number {
@@ -287,11 +204,7 @@ function skipIgnorableTokens(tokens: Token[], from: number): number {
   return cursor;
 }
 
-function findValueEndForDefinition(
-  tokens: Token[],
-  from: number,
-  stopNames: string[]
-): number {
+function findValueEndForDefinition(tokens: Token[], from: number, stopNames: string[]): number {
   if (stopNames.length === 0) {
     return tokens.length;
   }
@@ -314,7 +227,7 @@ function findValueEndForDefinition(
   return tokens.length;
 }
 
-function parseNestedBlockValue(tokens: Token[], from: number): { value: NestedBlockNode; next: number } {
+function parseNestedBlockValue(tokens: Token[], from: number, scope?: ParserScope): { value: NestedBlockNode; next: number } {
   let cursor = skipIgnorableTokens(tokens, from);
 
   if (!tokens[cursor] || tokens[cursor]!.value !== "{") {
@@ -333,7 +246,7 @@ function parseNestedBlockValue(tokens: Token[], from: number): { value: NestedBl
       if (depth === 0) {
         const content = tokens.slice(openIndex + 1, cursor).map((t) => t.value).join("");
         return {
-          value: { kind: "nested-block", content },
+          value: { kind: "nested-block", content, scope },
           next: cursor + 1
         };
       }
@@ -349,12 +262,14 @@ function parseValueByKind(
   from: number,
   definition: CommandArgumentDefinition,
   stopNames: string[],
-  config: ParserConfig,
+  expressionConfig: ExpressionParserConfig,
   commandDefinition: Required<CommandDefinition>,
+  activeScope: ResolvedParserScope,
   lineOffset = 1
 ): { value: ArgumentValue; next: number } {
   if (definition.kind === "nested-block") {
-    const parsed = parseNestedBlockValue(tokens, from);
+    const nestedScope = mergeScope(activeScope, definition.nestedScope);
+    const parsed = parseNestedBlockValue(tokens, from, toParserScope(nestedScope));
     return { value: parsed.value, next: parsed.next };
   }
 
@@ -362,20 +277,27 @@ function parseValueByKind(
   const end = findValueEndForDefinition(tokens, start, stopNames);
   const segment = tokens.slice(start, end);
 
-  const value = parseArgumentValue(segment, config, {
-    ...commandDefinition,
-    argumentKind: definition.kind,
-    consumeRestAsSingleArgument: true,
-    parseNamedArguments: false
-  }, lineOffset);
+  const value = parseArgumentValue(
+    segment,
+    expressionConfig,
+    {
+      ...commandDefinition,
+      argumentKind: definition.kind,
+      consumeRestAsSingleArgument: true,
+      parseNamedArguments: false
+    },
+    lineOffset,
+    definition
+  );
 
   return { value, next: end };
 }
 
 function parseCommandArgumentsByDefinition(
   tokens: Token[],
-  config: ParserConfig,
+  expressionConfig: ExpressionParserConfig,
   commandDefinition: Required<CommandDefinition>,
+  activeScope: ResolvedParserScope,
   lineOffset = 1
 ): CommandArguments {
   const args: CommandArguments = {};
@@ -424,7 +346,16 @@ function parseCommandArgumentsByDefinition(
         while (varargCursor < tokens.length) {
           let parsed;
           try {
-            parsed = parseValueByKind(tokens, varargCursor, definition, [], config, commandDefinition, lineOffset);
+            parsed = parseValueByKind(
+              tokens,
+              varargCursor,
+              definition,
+              [],
+              expressionConfig,
+              commandDefinition,
+              activeScope,
+              lineOffset
+            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Invalid value for argument '${definition.name}': ${message}`);
@@ -437,12 +368,18 @@ function parseCommandArgumentsByDefinition(
         for (const segment of segments) {
           let parsedValue: ArgumentValue;
           try {
-            parsedValue = parseArgumentValue(segment, config, {
-              ...commandDefinition,
-              argumentKind: definition.kind,
-              consumeRestAsSingleArgument: true,
-              parseNamedArguments: false
-            }, lineOffset);
+            parsedValue = parseArgumentValue(
+              segment,
+              expressionConfig,
+              {
+                ...commandDefinition,
+                argumentKind: definition.kind,
+                consumeRestAsSingleArgument: true,
+                parseNamedArguments: false
+              },
+              lineOffset,
+              definition
+            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Invalid value for argument '${definition.name}': ${message}`);
@@ -463,7 +400,16 @@ function parseCommandArgumentsByDefinition(
 
     let parsed;
     try {
-      parsed = parseValueByKind(tokens, cursor, definition, remainingNamedStops, config, commandDefinition, lineOffset);
+      parsed = parseValueByKind(
+        tokens,
+        cursor,
+        definition,
+        remainingNamedStops,
+        expressionConfig,
+        commandDefinition,
+        activeScope,
+        lineOffset
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Invalid value for argument '${definition.name}': ${message}`);
@@ -531,29 +477,20 @@ function splitArguments(tokens: Token[]): Token[][] {
   return segments;
 }
 
-function parseExpressionFromTokens(tokens: Token[], config: ParserConfig, lineOffset = 1): ExpressionNode {
-  const compact = compactTokens(tokens);
-  if (compact.length === 0) {
-    throw createParserError("Expected expression", lineOffset);
-  }
-
-  const state: ParserState = { tokens: compact, index: 0, config, lineOffset };
-  const value = parseExpression(state);
-
-  if (state.index < compact.length) {
-    const next = compact[state.index];
-    throw createParserError(`Unexpected token '${next?.value ?? ""}' after expression`, lineOffset, next);
-  }
-
-  return value;
-}
-
 export function createParser(config: ParserConfig): GenericParser {
-  function parseLine(line: string, startLine = 1): StatementNode {
+  const baseScope = resolveScopeFromConfig(config);
+
+  function parseLine(line: string, startLine = 1, scope?: ParserScope): StatementNode {
     const tokens = scan(line);
     const firstToken = tokens.find((token) => !isIgnorable(token));
 
     return withParserErrorContext(startLine, firstToken, () => {
+      const activeScope = mergeScope(baseScope, scope);
+      const expressionConfig: ExpressionParserConfig = {
+        prefixOperators: activeScope.prefixOperators,
+        infixOperators: activeScope.infixOperators
+      };
+
       const commandIndex = tokens.findIndex((token) => !isIgnorable(token));
       if (commandIndex < 0) {
         throw createParserError("A command must start with an identifier", startLine);
@@ -565,12 +502,12 @@ export function createParser(config: ParserConfig): GenericParser {
       }
 
       const name = commandToken.value;
-      const commandDefinition = resolveCommandDefinition(config, name);
+      const commandDefinition = resolveCommandDefinition(activeScope, name);
       const remainder = trimIgnorableEdges(tokens.slice(commandIndex + 1));
       const compactRemainder = compactTokens(remainder);
 
-      if (config.allowAssignmentStatements && compactRemainder[0]?.type === "operator" && compactRemainder[0].value === "=") {
-        const value = parseExpressionFromTokens(compactRemainder.slice(1), config, startLine);
+      if (activeScope.allowAssignmentStatements && compactRemainder[0]?.type === "operator" && compactRemainder[0].value === "=") {
+        const value = parseExpressionFromTokens(compactRemainder.slice(1), expressionConfig, startLine);
         return {
           kind: "assignment",
           name,
@@ -580,15 +517,15 @@ export function createParser(config: ParserConfig): GenericParser {
       }
 
       const args = commandDefinition.arguments.length > 0
-        ? parseCommandArgumentsByDefinition(remainder, config, commandDefinition, startLine)
+        ? parseCommandArgumentsByDefinition(remainder, expressionConfig, commandDefinition, activeScope, startLine)
         : commandDefinition.consumeRestAsSingleArgument
           ? remainder.length > 0
-            ? { arg0: parseArgumentValue(remainder, config, commandDefinition, startLine) }
+            ? { arg0: parseArgumentValue(remainder, expressionConfig, commandDefinition, startLine) }
             : {}
           : Object.fromEntries(
             splitArguments(remainder).map((tokensForArg, index) => [
               `arg${index}`,
-              parseArgumentValue(tokensForArg, config, commandDefinition, startLine)
+              parseArgumentValue(tokensForArg, expressionConfig, commandDefinition, startLine)
             ])
           );
 
@@ -601,8 +538,8 @@ export function createParser(config: ParserConfig): GenericParser {
     });
   }
 
-  function parseScript(input: string): StatementNode[] {
-    return splitLogicalLinesWithMetadata(input).map((line) => parseLine(line.content, line.startLine));
+  function parseScript(input: string, scope?: ParserScope): StatementNode[] {
+    return splitLogicalLinesWithMetadata(input).map((line) => parseLine(line.content, line.startLine, scope));
   }
 
   return {
@@ -657,5 +594,3 @@ export function getCommandArgumentSource(line: string): string {
 
   return trimmed.slice(i);
 }
-
-*/

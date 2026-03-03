@@ -7,7 +7,7 @@ This directory defines the shell language configuration and command execution.
 - `commands/eval.ts` - Evaluates a single arithmetic expression.
 - `commands/echo.ts` - Prints command arguments.
 - `commands/if.ts` - Conditional command execution with `then` and optional `else` blocks.
-- `commands/func.ts` - User-defined command declarations and invocation.
+- `commands/command.ts` - User-defined command declarations and invocation.
 - `commands/while.ts` - Loop while a condition expression is non-zero.
 - `commands/for.ts` - Counted loop with iterator, range, and optional step.
 
@@ -59,13 +59,13 @@ Examples:
 - `if 0 then { echo yes } else { echo no }`
 - `if 1 then { if 0 then { echo a } else { echo b } }`
 
-### `func`
+### `cmd`
 
 Defines a custom command.
 
 Syntax:
 
-- `func FUNCTION_NAME ARG_DECLS { COMMANDS }`
+- `cmd COMMAND_NAME ARG_DECLS { COMMANDS }`
 
 Argument declaration format:
 
@@ -80,14 +80,14 @@ Argument declaration format:
 - `1` => single expression value
 - `N > 1` => exactly `N` expression values (available as a list)
 
-All function argument values are parsed as expressions.
+All command argument values are parsed as expressions.
 
-In function bodies, use `$argName` placeholders to reference parsed values.
+In command bodies, use `$argName` placeholders to reference parsed values.
 
 Examples:
 
-- `func add a b { eval $a + $b }`
-- `func cfg flag:0 x:1 y:2 { echo $flag $x $y }`
+- `cmd add a b { eval $a + $b }`
+- `cmd cfg flag:0 x:1 y:2 { echo $flag $x $y }`
 
 ### `while`
 

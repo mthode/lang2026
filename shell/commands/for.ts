@@ -34,7 +34,7 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
       }
       iterations += 1;
 
-      outputs.push(...executeBodyStatements(body.content, context, environment, { [iterator.name]: value }));
+      outputs.push(...executeBodyStatements(body.content, context, environment, { [iterator.name]: value }, body.scope));
     }
   } else {
     for (let value = start; value >= end; value += step) {
@@ -43,7 +43,7 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
       }
       iterations += 1;
 
-      outputs.push(...executeBodyStatements(body.content, context, environment, { [iterator.name]: value }));
+      outputs.push(...executeBodyStatements(body.content, context, environment, { [iterator.name]: value }, body.scope));
     }
   }
 
