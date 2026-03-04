@@ -10,6 +10,21 @@ This directory defines the shell language configuration and command execution.
 - `commands/command.ts` - User-defined command declarations and invocation.
 - `commands/while.ts` - Loop while a condition expression is non-zero.
 - `commands/for.ts` - Counted loop with iterator, range, and optional step.
+- `commands/function.ts` - User-defined expression function declarations.
+
+## Commands vs functions
+
+Commands and functions are distinct at the statement level:
+
+- Commands are executed as top-level statements (`echo hello`, `if ... then { ... }`, `cmd ...`).
+- Functions are called only inside expressions (`eval add(3, 4)`).
+
+Cross-calls are rejected:
+
+- Calling a function where a command is expected fails.
+- Calling a command where a function expression is expected fails.
+
+At the expression level, both command and function systems share the same expression parser and evaluator concepts.
 
 ## Supported commands
 
@@ -119,6 +134,28 @@ Examples:
 
 - `cmd add a b { eval $a + $b }`
 - `cmd cfg flag:0 x:1 y:2 { echo $flag $x $y }`
+
+Command body statements are shell command statements.
+
+### `func`
+
+Defines an expression function.
+
+Syntax:
+
+- `func FUNCTION_NAME ( PARAMETER_NAMES ) { FUNCTION_BODY }`
+
+Examples:
+
+- `func add ( a, b ) { a + b }`
+- `eval add(3, 4)`
+
+Function body statements are not shell commands. They are function statements:
+
+- Expression statement: `a + b`
+- Function-level if statement: `if CONDITION { ... } else { ... }`
+
+This is separate from shell command bodies, where `if` is the `if` command (`if ... then { ... }`).
 
 ### `while`
 

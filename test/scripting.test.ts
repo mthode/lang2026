@@ -15,9 +15,9 @@ describe("scripting", () => {
     expect(normalizeOutput(output)).toBe("hello script\n12");
   });
 
-  it("runs function definitions from a .script file", async () => {
+  it("runs command definitions from a .script file", async () => {
     let output = "";
-    await runScriptFile("test/scripts/function.script", (text) => {
+    await runScriptFile("test/scripts/command.script", (text) => {
       output += text;
     });
 

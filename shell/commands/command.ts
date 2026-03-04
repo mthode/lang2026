@@ -6,7 +6,7 @@ import type {
   ShellCommandContext,
   ShellCommandExecutor,
   ShellEnvironment,
-  UserFunctionDefinition as UserCommandDefinition
+  UserCommandDefinition
 } from "./types.js";
 
 type CommandArgDeclaration = UserCommandDefinition["declarations"][number];
@@ -18,7 +18,11 @@ export const executeCmdCommand: ShellCommandExecutor = (command, _context, envir
   }
 
   const definition = parseCommandDefinition(declarationSource);
-  environment.functions.set(definition.name, definition);
+  if (environment.expressionFunctions.has(definition.name)) {
+    throw new Error(`Cannot define command '${definition.name}': a function with that name already exists`);
+  }
+
+  environment.commands.set(definition.name, definition);
   return undefined;
 };
 
@@ -28,7 +32,7 @@ export function executeUserCommand(
   context: ShellCommandContext,
   environment: ShellEnvironment
 ): string | undefined {
-  const definition = environment.functions.get(commandName);
+  const definition = environment.commands.get(commandName);
   if (!definition) {
     return undefined;
   }

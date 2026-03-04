@@ -3,7 +3,8 @@ import type { CommandNode, ParserScope, StatementNode } from "../../parser/index
 export interface ShellEnvironment {
   variables: Record<string, number>;
   localVariables: Record<string, number>;
-  functions: Map<string, UserFunctionDefinition>;
+  commands: Map<string, UserCommandDefinition>;
+  expressionFunctions: Map<string, ShellFunctionDefinition>;
   currentDirectory: string;
   executeOsCommand(command: string, args: string[]): string | undefined;
   changeDirectory(path: string, currentDirectory: string): string;
@@ -15,7 +16,7 @@ export interface ShellEnvironmentOptions {
   changeDirectory?: (path: string, currentDirectory: string) => string;
 }
 
-export interface UserFunctionDefinition {
+export interface UserCommandDefinition {
   name: string;
   declarations: Array<
     | {
@@ -33,11 +34,18 @@ export interface UserFunctionDefinition {
   body: string;
 }
 
+export interface ShellFunctionDefinition {
+  name: string;
+  parameters: string[];
+  body: string;
+}
+
 export function createShellEnvironment(options: ShellEnvironmentOptions = {}): ShellEnvironment {
   return {
     variables: {},
     localVariables: {},
-    functions: new Map(),
+    commands: new Map(),
+    expressionFunctions: new Map(),
     currentDirectory: options.currentDirectory ?? "/",
     executeOsCommand: options.executeOsCommand ?? (() => {
       throw new Error("OS commands are not available on the web");

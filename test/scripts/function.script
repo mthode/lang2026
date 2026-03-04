@@ -1,2 +1,0 @@
-cmd add a b { eval $a + $b }
-add 10 15

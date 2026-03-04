@@ -5,39 +5,19 @@ import { executeEchoCommand } from "./commands/echo.js";
 import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
 import { executeCdCommand } from "./commands/cd.js";
+import { executeFuncCommand } from "./commands/function.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
+import { shellExpressionConfig } from "./expression-config.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
 import { evaluateShellExpression, substituteStatementVariables } from "./utils/expression.js";
 import { getCommandArgumentSource } from "../parser/index.js";
 export { evaluateShellExpression } from "./utils/expression.js";
 
 const shellParserConfig: ParserConfig = {
-  prefixOperators: {
-    "+": { precedence: 9 },
-    "-": { precedence: 9 },
-    "!": { precedence: 9 },
-    "~": { precedence: 9 }
-  },
-  infixOperators: {
-    ",": { precedence: 1 },
-    "=": { precedence: 2, associativity: "right" },
-    "||": { precedence: 3 },
-    "&&": { precedence: 4 },
-    "==": { precedence: 5 },
-    "!=": { precedence: 5 },
-    "<": { precedence: 6 },
-    ">": { precedence: 6 },
-    "<=": { precedence: 6 },
-    ">=": { precedence: 6 },
-    "+": { precedence: 7 },
-    "-": { precedence: 7 },
-    "*": { precedence: 8 },
-    "/": { precedence: 8 },
-    "%": { precedence: 8 }
-  },
+  ...shellExpressionConfig,
   allowAssignmentStatements: true,
   defaultCommand: {
     argumentKind: "raw",
@@ -48,6 +28,9 @@ const shellParserConfig: ParserConfig = {
       arguments: [{ name: "path", kind: "raw", positional: true, vararg: true }]
     },
     cmd: {
+      arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
+    },
+    func: {
       arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
     },
     if: {
@@ -89,6 +72,7 @@ const shellParser = createParser(shellParserConfig);
 const commandExecutors: Record<string, ShellCommandExecutor> = {
   cd: executeCdCommand,
   cmd: executeCmdCommand,
+  func: executeFuncCommand,
   eval: executeEvalCommand,
   echo: executeEchoCommand,
   if: executeIfCommand,
@@ -156,8 +140,12 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
     return commandExecutor(statement, commandContext, environment);
   }
 
-  if (environment.functions.has(statement.name)) {
+  if (environment.commands.has(statement.name)) {
     return executeUserCommand(statement.name, statement.raw, commandContext, environment);
+  }
+
+  if (environment.expressionFunctions.has(statement.name)) {
+    throw new Error(`Cannot execute function '${statement.name}' as a command`);
   }
 
   const remainder = getCommandArgumentSource(statement.raw);

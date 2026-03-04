@@ -1,5 +1,6 @@
 import type { ExpressionNode } from "../../parser/index.js";
 import type { ShellEnvironment } from "../commands/types.js";
+import { evaluateFunctionCallExpression } from "./function-processing.js";
 
 export function evaluateShellExpression(
   expression: ExpressionNode,
@@ -36,6 +37,10 @@ export function evaluateShellExpression(
     if (expression.operator === "/") return left / right;
 
     throw new Error(`Unsupported binary operator '${expression.operator}'`);
+  }
+
+  if (expression.kind === "call") {
+    return evaluateFunctionCallExpression(expression, environment, evaluateShellExpression);
   }
 
   throw new Error(`Unsupported expression kind '${expression.kind}'`);

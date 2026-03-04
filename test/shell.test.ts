@@ -116,6 +116,45 @@ describe("shell eval command", () => {
     expect(callOutput).toBe("5");
   });
 
+  it("defines and invokes expression functions inside expressions", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("func add ( a, b ) { a + b }"), environment);
+    const output = executeShellCommand(parseShellLine("eval add(3, 4)"), environment);
+
+    expect(output).toBe("7");
+  });
+
+  it("supports function-level if statements in function bodies", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("func sign ( x ) { if x { 1 } else { -1 } }"), environment);
+
+    const positive = executeShellCommand(parseShellLine("eval sign(12)"), environment);
+    const zero = executeShellCommand(parseShellLine("eval sign(0)"), environment);
+
+    expect(positive).toBe("1");
+    expect(zero).toBe("-1");
+  });
+
+  it("rejects calling a function where a command is expected", () => {
+    const environment = createShellEnvironment();
+    executeShellCommand(parseShellLine("func onlyExpr ( x ) { x + 1 }"), environment);
+
+    expect(() => executeShellCommand(parseShellLine("onlyExpr 10"), environment)).toThrowError(
+      "Cannot execute function 'onlyExpr' as a command"
+    );
+  });
+
+  it("rejects calling a command where a function is expected", () => {
+    const environment = createShellEnvironment();
+    executeShellCommand(parseShellLine("cmd greet name { echo $name }"), environment);
+
+    expect(() => executeShellCommand(parseShellLine("eval greet(1)"), environment)).toThrowError(
+      "Cannot call command 'greet' as a function"
+    );
+  });
+
   it("supports optional positional function arguments", () => {
     const environment = createShellEnvironment();
     executeShellCommand(parseShellLine("cmd show a [b] { echo $a }"), environment);
