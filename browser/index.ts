@@ -12,6 +12,18 @@ export function attachBrowserRepl(options: BrowserReplOptions): void {
 
   options.input.addEventListener("keydown", async (event) => {
     const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key === "ArrowUp") {
+      keyboardEvent.preventDefault();
+      options.input.value = engine.navigateHistory("up", options.input.value);
+      return;
+    }
+
+    if (keyboardEvent.key === "ArrowDown") {
+      keyboardEvent.preventDefault();
+      options.input.value = engine.navigateHistory("down", options.input.value);
+      return;
+    }
+
     if (keyboardEvent.key !== "Enter") return;
     keyboardEvent.preventDefault();
 

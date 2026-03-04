@@ -74,31 +74,8 @@
       }
 
       try {
-        const { ReplEngine } = await import("../dist/repl/index.js");
-        const engine = new ReplEngine();
-
-        input.addEventListener("keydown", async (event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-
-          const line = input.value;
-          input.value = "";
-
-          try {
-            const result = await engine.evaluate(line);
-            const text = result.pending ? "..." : result.output ?? "ok";
-            const row = document.createElement("div");
-            row.textContent = text;
-            output.appendChild(row);
-            output.scrollTop = output.scrollHeight;
-          } catch (error) {
-            const row = document.createElement("div");
-            row.style.color = "#fca5a5";
-            row.textContent = `error: ${error instanceof Error ? error.message : String(error)}`;
-            output.appendChild(row);
-            output.scrollTop = output.scrollHeight;
-          }
-        });
+        const { attachBrowserRepl } = await import("../dist/browser/index.js");
+        attachBrowserRepl({ input, output });
       } catch (error) {
         const row = document.createElement("div");
         row.style.color = "#fca5a5";
