@@ -1,12 +1,17 @@
-import { extractNestedBlock, parseExpressionFromTokens, type ExpressionNode } from "../../parser/index.js";
+import { parseExpressionFromTokens, type ExpressionNode } from "../../parser/index.js";
 import { scan, splitLogicalLinesWithMetadata } from "../../scanner/index.js";
 import type { ShellEnvironment } from "../commands/types.js";
 import { shellExpressionConfig } from "../expression-config.js";
+import { evaluateFunctionForStatement, parseFunctionForStatement, type FunctionForStatement } from "../statements/for.js";
+import { evaluateFunctionIfStatement, parseFunctionIfStatement, type FunctionIfStatement } from "../statements/if.js";
+import { evaluateFunctionWhileStatement, parseFunctionWhileStatement, type FunctionWhileStatement } from "../statements/while.js";
 import { withLocalVariables } from "./local-scope.js";
 
 type FunctionBodyStatement =
   | { kind: "expression"; value: ExpressionNode }
-  | { kind: "if"; condition: ExpressionNode; thenBody: FunctionBodyStatement[]; elseBody?: FunctionBodyStatement[] };
+  | FunctionIfStatement<FunctionBodyStatement>
+  | FunctionWhileStatement<FunctionBodyStatement>
+  | FunctionForStatement<FunctionBodyStatement>;
 
 export type ExpressionEvaluator = (expression: ExpressionNode, environment: ShellEnvironment) => number;
 
@@ -91,18 +96,23 @@ function evaluateFunctionBodyStatements(
       continue;
     }
 
-    const conditionValue = evaluateExpression(statement.condition, environment);
-    if (conditionValue !== 0) {
-      lastValue = evaluateFunctionBodyStatements(statement.thenBody, environment, evaluateExpression);
+    if (statement.kind === "if") {
+      lastValue = evaluateFunctionIfStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+        evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
+      );
       continue;
     }
 
-    if (statement.elseBody) {
-      lastValue = evaluateFunctionBodyStatements(statement.elseBody, environment, evaluateExpression);
+    if (statement.kind === "while") {
+      lastValue = evaluateFunctionWhileStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+        evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
+      );
       continue;
     }
 
-    lastValue = 0;
+    lastValue = evaluateFunctionForStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+      evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
+    );
   }
 
   return lastValue;
@@ -122,53 +132,20 @@ function parseFunctionBodyStatement(source: string): FunctionBodyStatement {
   }
 
   if (source.startsWith("if") && /\s/.test(source[2] ?? "")) {
-    return parseFunctionIfStatement(source);
+    return parseFunctionIfStatement(source, parseFunctionBodyStatements);
+  }
+
+  if (source.startsWith("while") && /\s/.test(source[5] ?? "")) {
+    return parseFunctionWhileStatement(source, parseFunctionBodyStatements);
+  }
+
+  if (source.startsWith("for") && /\s/.test(source[3] ?? "")) {
+    return parseFunctionForStatement(source, parseFunctionBodyStatements);
   }
 
   return {
     kind: "expression",
     value: parseExpressionFromSource(source)
-  };
-}
-
-function parseFunctionIfStatement(source: string): FunctionBodyStatement {
-  const afterIf = source.slice(2).trim();
-  const thenBlockStart = afterIf.indexOf("{");
-  if (thenBlockStart < 0) {
-    throw new Error("Function if-statement requires a '{ ... }' then block");
-  }
-
-  const rawCondition = afterIf.slice(0, thenBlockStart).trim();
-  const conditionSource = rawCondition.endsWith("then")
-    ? rawCondition.slice(0, rawCondition.length - 4).trim()
-    : rawCondition;
-  if (conditionSource.length === 0) {
-    throw new Error("Function if-statement requires a condition expression");
-  }
-
-  const thenBlock = extractNestedBlock(afterIf, thenBlockStart);
-  const trailing = afterIf.slice(thenBlock.closeIndex + 1).trim();
-
-  let elseBody: FunctionBodyStatement[] | undefined;
-  if (trailing.length > 0) {
-    if (!trailing.startsWith("else")) {
-      throw new Error("Unexpected trailing content after function if-statement");
-    }
-
-    const elseSource = trailing.slice(4).trim();
-    const elseBlock = extractNestedBlock(elseSource, 0);
-    const elseTrailing = elseSource.slice(elseBlock.closeIndex + 1).trim();
-    if (elseTrailing.length > 0) {
-      throw new Error("Unexpected content after function else block");
-    }
-    elseBody = parseFunctionBodyStatements(elseBlock.content);
-  }
-
-  return {
-    kind: "if",
-    condition: parseExpressionFromSource(conditionSource),
-    thenBody: parseFunctionBodyStatements(thenBlock.content),
-    elseBody
   };
 }
 

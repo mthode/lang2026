@@ -1,113 +1,176 @@
-# Shell Commands
+# Shell language
 
-This directory defines the shell language configuration and command execution.
+This directory defines shell parsing, statement execution, and expression-function execution.
 
-## Command files
+## Statement model
 
-- `commands/eval.ts` - Evaluates a single arithmetic expression.
-- `commands/echo.ts` - Prints command arguments.
-- `commands/if.ts` - Conditional command execution with `then` and optional `else` blocks.
-- `commands/command.ts` - User-defined command declarations and invocation.
-- `commands/while.ts` - Loop while a condition expression is non-zero.
-- `commands/for.ts` - Counted loop with iterator, range, and optional step.
-- `commands/function.ts` - User-defined expression function declarations.
+The shell has two statement contexts:
 
-## Commands vs functions
+- Top-level shell statements (interactive lines, scripts, and `cmd` bodies)
+- Function-body statements (inside `func ... { ... }`)
 
-Commands and functions are distinct at the statement level:
+These are intentionally different.
 
-- Commands are executed as top-level statements (`echo hello`, `if ... then { ... }`, `cmd ...`).
-- Functions are called only inside expressions (`eval add(3, 4)`).
+## Top-level shell statements
 
-Cross-calls are rejected:
+Supported statement kinds:
 
-- Calling a function where a command is expected fails.
-- Calling a command where a function expression is expected fails.
+1. Assignment statement
+2. Command statement
 
-At the expression level, both command and function systems share the same expression parser and evaluator concepts.
+### 1) Assignment statement
 
-## Supported commands
+Syntax:
 
-### Prompt
+- `IDENTIFIER = EXPRESSION`
 
-In the terminal runtime, the prompt includes the current working directory, for example:
+Example:
 
-- `/home/user/project> `
+- `x = 10`
+- `eval x * 2`
 
-The browser runtime does not include this prompt feature.
+### 2) Command statement
 
-### External OS commands
+Syntax:
 
-If a command is not implemented by the shell (and is not a user-defined `cmd` command), the runtime tries to execute it using the operating system.
+- `COMMAND_NAME ARGUMENTS...`
+
+Examples:
+
+- `echo hello`
+- `if 1 then { echo yes }`
+
+If a command name is not a built-in and not user-defined via `cmd`, execution falls back to the OS command runner (Node runtime only).
+
+## Function-body statements
+
+`func` bodies use a separate statement set.
+
+Supported function statement kinds:
+
+1. Expression statement
+2. Function `if` statement
+3. Function `while` statement
+4. Function `for` statement
+
+### 1) Expression statement
+
+Any expression as a statement.
+
+Example:
+
+- `a + b`
+
+### 2) Function `if` statement
+
+Syntax:
+
+- `if CONDITION { FUNCTION_STATEMENTS }`
+- `if CONDITION { FUNCTION_STATEMENTS } else { FUNCTION_STATEMENTS }`
+
+`CONDITION` is an expression; `0` is false, non-zero is true.
+
+### 3) Function `while` statement
+
+Syntax:
+
+- `while CONDITION do { FUNCTION_STATEMENTS }`
+- `while CONDITION { FUNCTION_STATEMENTS }` (also accepted)
 
 Behavior:
 
-- Arguments are forwarded as raw strings.
-- Expressions are not evaluated for external commands.
-- In the browser runtime, this throws: `OS commands are not available on the web`.
+- `CONDITION` is re-evaluated each iteration.
+- Local identifier `loop` is available in the condition and body (`0`, `1`, `2`, ...).
+- Loop stops when condition evaluates to `0`.
+
+### 4) Function `for` statement
+
+Syntax:
+
+- `for ITERATOR from START to END do { FUNCTION_STATEMENTS }`
+- `for ITERATOR from START to END step STEP do { FUNCTION_STATEMENTS }`
+- `do` is optional before `{ ... }`.
+
+Behavior:
+
+- `ITERATOR` must be an identifier.
+- Default `STEP` is `1`.
+- `STEP = 0` is an error.
+- Positive step: iterate while `value <= END`.
+- Negative step: iterate while `value >= END`.
+
+## Commands vs expression functions
+
+Commands and expression functions are separate namespaces and call sites:
+
+- Commands run as statements: `echo hi`, `cmd greet name { ... }`
+- Functions run in expressions: `eval add(3, 4)`
+
+Cross-calls are rejected:
+
+- Calling a function as a command fails.
+- Calling a command as a function fails.
+
+## Built-in commands
 
 ### `cd`
 
-Changes the current working directory used by the shell and external OS command execution.
+Change current working directory.
 
 Syntax:
 
 - `cd PATH`
 
-Examples:
-
-- `cd ..`
-- `cd /tmp`
-
 ### `eval`
 
-Evaluates one expression and returns the numeric result as text.
+Evaluate one expression and return a numeric result as text.
 
 Examples:
 
 - `eval 1 + 2 * 3`
 - `eval -(10 / 2)`
 
-Supported operators for evaluation: `+`, `-`, `*`, `/`.
-
 ### `echo`
 
-Prints arguments as a single line.
-
-Examples:
-
-- `echo hello world`
-- `echo value is 42`
+Print arguments as a single line.
 
 ### `if`
 
-Conditional execution with nested command blocks.
+Shell command conditional.
 
 Syntax:
 
-- `if EXPRESSION then { NESTED-COMMANDS }`
-- `if EXPRESSION then { NESTED-COMMANDS } else { NESTED-COMMANDS }`
+- `if EXPRESSION then { COMMANDS }`
+- `if EXPRESSION then { COMMANDS } else { COMMANDS }`
 
-Behavior:
+### `while`
 
-- `if` takes a positional condition expression argument.
-- `then` and `else` are named arguments.
-- `then` requires a single `nested-block` value.
-- `else` takes a single optional `nested-block` value.
-- Condition is evaluated via `eval` semantics.
-- Numeric `0` is false; non-zero is true.
-- Non-numeric non-empty output is true.
-- `else` block is optional.
+Shell command loop.
 
-Examples:
+Syntax:
 
-- `if 1 then { echo yes }`
-- `if 0 then { echo yes } else { echo no }`
-- `if 1 then { if 0 then { echo a } else { echo b } }`
+- `while EXPRESSION do { COMMANDS }`
+
+Special variable:
+
+- `$loop` in condition/body interpolation.
+
+### `for`
+
+Shell command counted loop.
+
+Syntax:
+
+- `for ITERATOR from START_EXPR to END_EXPR do { COMMANDS }`
+- `for ITERATOR from START_EXPR to END_EXPR step STEP_EXPR do { COMMANDS }`
+
+Special variable:
+
+- `$ITERATOR` in body interpolation.
 
 ### `cmd`
 
-Defines a custom command.
+Define a custom command.
 
 Syntax:
 
@@ -115,79 +178,42 @@ Syntax:
 
 Argument declaration format:
 
-- Positional arg: `name`
-- Optional positional arg: `[name]`
-- Named arg with arity: `NAME:NUM_ARGS`
-- Optional named arg with arity: `[NAME:NUM_ARGS]`
+- Positional: `name`
+- Optional positional: `[name]`
+- Named with arity: `NAME:NUM_ARGS`
+- Optional named with arity: `[NAME:NUM_ARGS]`
 
 `NUM_ARGS`:
 
-- `0` => flag (no values)
-- `1` => single expression value
-- `N > 1` => exactly `N` expression values (available as a list)
+- `0` => flag
+- `1` => single value
+- `N > 1` => exactly `N` values
 
-All command argument values are parsed as expressions.
-
-In command bodies, use `$argName` placeholders to reference parsed values.
-
-Examples:
-
-- `cmd add a b { eval $a + $b }`
-- `cmd cfg flag:0 x:1 y:2 { echo $flag $x $y }`
-
-Command body statements are shell command statements.
+Use `$argName` inside command bodies.
 
 ### `func`
 
-Defines an expression function.
+Define an expression function.
 
 Syntax:
 
-- `func FUNCTION_NAME ( PARAMETER_NAMES ) { FUNCTION_BODY }`
+- `func FUNCTION_NAME ( PARAMS ) { FUNCTION_STATEMENTS }`
 
-Examples:
+Example:
 
 - `func add ( a, b ) { a + b }`
 - `eval add(3, 4)`
 
-Function body statements are not shell commands. They are function statements:
+## Runtime notes
 
-- Expression statement: `a + b`
-- Function-level if statement: `if CONDITION { ... } else { ... }`
+### Prompt
 
-This is separate from shell command bodies, where `if` is the `if` command (`if ... then { ... }`).
+Terminal prompt includes current directory (for example `/home/user/project> `).
 
-### `while`
+### External OS commands
 
-Syntax:
+When command lookup misses shell built-ins and user `cmd` definitions, execution is delegated to OS commands in Node runtime.
 
-- `while EXPRESSION do { COMMANDS }`
+In browser runtime this throws:
 
-Behavior:
-
-- Condition is evaluated each iteration.
-- Loop runs while condition is non-zero.
-- Special variable `loop` is available inside condition and body interpolation as `$loop`.
-
-Example:
-
-- `while 3 - loop do { echo $loop }`
-
-### `for`
-
-Syntax:
-
-- `for ITERATOR from START_EXPR to END_EXPR do { COMMANDS }`
-- `for ITERATOR from START_EXPR to END_EXPR step STEP_EXPR do { COMMANDS }`
-
-Behavior:
-
-- `ITERATOR` must be an identifier.
-- Default `step` is `1`.
-- Positive step iterates while `value <= end`; negative step iterates while `value >= end`.
-- Iterator is available in body interpolation as `$ITERATOR`.
-
-Examples:
-
-- `for i from 1 to 3 do { echo $i }`
-- `for i from 1 to 5 step 2 do { echo $i }`
+- `OS commands are not available on the web`
