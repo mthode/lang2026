@@ -2,17 +2,17 @@ import { extractNestedBlock, type ExpressionNode } from "../../parser/index.js";
 import type { ExpressionRuntimeEnvironment } from "../types.js";
 import { parseStatementExpressionSource } from "./expression.js";
 
-export interface FunctionIfStatement<TStatement> {
+export interface IfStatement<TStatement> {
   kind: "if";
   condition: ExpressionNode;
   thenBody: TStatement[];
   elseBody?: TStatement[];
 }
 
-export function parseFunctionIfStatement<TStatement>(
+export function parseIfStatement<TStatement>(
   source: string,
   parseBody: (body: string) => TStatement[]
-): FunctionIfStatement<TStatement> {
+): IfStatement<TStatement> {
   const afterIf = source.slice(2).trim();
   const thenBlockStart = afterIf.indexOf("{");
   if (thenBlockStart < 0) {
@@ -53,8 +53,8 @@ export function parseFunctionIfStatement<TStatement>(
   };
 }
 
-export function evaluateFunctionIfStatement<TStatement>(
-  statement: FunctionIfStatement<TStatement>,
+export function evaluateIfStatement<TStatement>(
+  statement: IfStatement<TStatement>,
   environment: ExpressionRuntimeEnvironment,
   evaluateExpression: (expression: ExpressionNode, environment: ExpressionRuntimeEnvironment) => number,
   evaluateStatements: (statements: TStatement[], environment: ExpressionRuntimeEnvironment) => number

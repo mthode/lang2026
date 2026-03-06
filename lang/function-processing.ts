@@ -1,17 +1,17 @@
 import { parseExpressionFromTokens, type ExpressionNode } from "../parser/index.js";
 import { scan, splitLogicalLinesWithMetadata } from "../scanner/index.js";
 import { shellExpressionConfig } from "./expression-config.js";
-import { evaluateFunctionForStatement, parseFunctionForStatement, type FunctionForStatement } from "./statements/for.js";
-import { evaluateFunctionIfStatement, parseFunctionIfStatement, type FunctionIfStatement } from "./statements/if.js";
-import { evaluateFunctionWhileStatement, parseFunctionWhileStatement, type FunctionWhileStatement } from "./statements/while.js";
+import { evaluateForStatement, parseForStatement, type ForStatement } from "./statements/for.js";
+import { evaluateIfStatement, parseIfStatement, type IfStatement } from "./statements/if.js";
+import { evaluateWhileStatement, parseWhileStatement, type WhileStatement } from "./statements/while.js";
 import { withLocalVariables } from "./local-scope.js";
 import type { ExpressionRuntimeEnvironment } from "./types.js";
 
 type FunctionBodyStatement =
   | { kind: "expression"; value: ExpressionNode }
-  | FunctionIfStatement<FunctionBodyStatement>
-  | FunctionWhileStatement<FunctionBodyStatement>
-  | FunctionForStatement<FunctionBodyStatement>;
+  | IfStatement<FunctionBodyStatement>
+  | WhileStatement<FunctionBodyStatement>
+  | ForStatement<FunctionBodyStatement>;
 
 export type ExpressionEvaluator = (expression: ExpressionNode, environment: ExpressionRuntimeEnvironment) => number;
 
@@ -97,20 +97,20 @@ function evaluateFunctionBodyStatements(
     }
 
     if (statement.kind === "if") {
-      lastValue = evaluateFunctionIfStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+      lastValue = evaluateIfStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
         evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
       );
       continue;
     }
 
     if (statement.kind === "while") {
-      lastValue = evaluateFunctionWhileStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+      lastValue = evaluateWhileStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
         evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
       );
       continue;
     }
 
-    lastValue = evaluateFunctionForStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
+    lastValue = evaluateForStatement(statement, environment, evaluateExpression, (nestedStatements, nestedEnvironment) =>
       evaluateFunctionBodyStatements(nestedStatements, nestedEnvironment, evaluateExpression)
     );
   }
@@ -132,15 +132,15 @@ function parseFunctionBodyStatement(source: string): FunctionBodyStatement {
   }
 
   if (source.startsWith("if") && /\s/.test(source[2] ?? "")) {
-    return parseFunctionIfStatement(source, parseFunctionBodyStatements);
+    return parseIfStatement(source, parseFunctionBodyStatements);
   }
 
   if (source.startsWith("while") && /\s/.test(source[5] ?? "")) {
-    return parseFunctionWhileStatement(source, parseFunctionBodyStatements);
+    return parseWhileStatement(source, parseFunctionBodyStatements);
   }
 
   if (source.startsWith("for") && /\s/.test(source[3] ?? "")) {
-    return parseFunctionForStatement(source, parseFunctionBodyStatements);
+    return parseForStatement(source, parseFunctionBodyStatements);
   }
 
   return {

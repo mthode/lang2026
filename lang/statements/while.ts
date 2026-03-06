@@ -5,16 +5,16 @@ import { parseStatementExpressionSource } from "./expression.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export interface FunctionWhileStatement<TStatement> {
+export interface WhileStatement<TStatement> {
   kind: "while";
   condition: ExpressionNode;
   body: TStatement[];
 }
 
-export function parseFunctionWhileStatement<TStatement>(
+export function parseWhileStatement<TStatement>(
   source: string,
   parseBody: (body: string) => TStatement[]
-): FunctionWhileStatement<TStatement> {
+): WhileStatement<TStatement> {
   const afterWhile = source.slice("while".length).trim();
   const blockStart = afterWhile.indexOf("{");
   if (blockStart < 0) {
@@ -40,8 +40,8 @@ export function parseFunctionWhileStatement<TStatement>(
   };
 }
 
-export function evaluateFunctionWhileStatement<TStatement>(
-  statement: FunctionWhileStatement<TStatement>,
+export function evaluateWhileStatement<TStatement>(
+  statement: WhileStatement<TStatement>,
   environment: ExpressionRuntimeEnvironment,
   evaluateExpression: (expression: ExpressionNode, environment: ExpressionRuntimeEnvironment) => number,
   evaluateStatements: (statements: TStatement[], environment: ExpressionRuntimeEnvironment) => number

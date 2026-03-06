@@ -6,7 +6,7 @@ import { parseStatementExpressionSource } from "./expression.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export interface FunctionForStatement<TStatement> {
+export interface ForStatement<TStatement> {
   kind: "for";
   iterator: string;
   from: ExpressionNode;
@@ -15,10 +15,10 @@ export interface FunctionForStatement<TStatement> {
   body: TStatement[];
 }
 
-export function parseFunctionForStatement<TStatement>(
+export function parseForStatement<TStatement>(
   source: string,
   parseBody: (body: string) => TStatement[]
-): FunctionForStatement<TStatement> {
+): ForStatement<TStatement> {
   const afterFor = source.slice("for".length).trim();
   const blockStart = afterFor.indexOf("{");
   if (blockStart < 0) {
@@ -52,8 +52,8 @@ export function parseFunctionForStatement<TStatement>(
   };
 }
 
-export function evaluateFunctionForStatement<TStatement>(
-  statement: FunctionForStatement<TStatement>,
+export function evaluateForStatement<TStatement>(
+  statement: ForStatement<TStatement>,
   environment: ExpressionRuntimeEnvironment,
   evaluateExpression: (expression: ExpressionNode, environment: ExpressionRuntimeEnvironment) => number,
   evaluateStatements: (statements: TStatement[], environment: ExpressionRuntimeEnvironment) => number

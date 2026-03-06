@@ -2,7 +2,8 @@
 
 This directory defines shell parsing and command execution.
 
-Expression evaluation and function-body statement execution live in [lang/index.ts](../lang/index.ts).
+Expression evaluation and function-body statement execution live in `lang/`.
+For full function-language semantics, see [../lang/README.md](../lang/README.md).
 
 ## Statement model
 
@@ -44,62 +45,11 @@ Examples:
 
 If a command name is not a built-in and not user-defined via `cmd`, execution falls back to the OS command runner (Node runtime only).
 
-## Function-body statements
+## Expressions and functions in shell
 
-`func` bodies use a separate statement set.
+Shell statements can use expressions (for assignment, `eval`, conditions, and loop ranges).
 
-Supported function statement kinds:
-
-1. Expression statement
-2. Function `if` statement
-3. Function `while` statement
-4. Function `for` statement
-
-### 1) Expression statement
-
-Any expression as a statement.
-
-Example:
-
-- `a + b`
-
-### 2) Function `if` statement
-
-Syntax:
-
-- `if CONDITION { FUNCTION_STATEMENTS }`
-- `if CONDITION { FUNCTION_STATEMENTS } else { FUNCTION_STATEMENTS }`
-
-`CONDITION` is an expression; `0` is false, non-zero is true.
-
-### 3) Function `while` statement
-
-Syntax:
-
-- `while CONDITION do { FUNCTION_STATEMENTS }`
-- `while CONDITION { FUNCTION_STATEMENTS }` (also accepted)
-
-Behavior:
-
-- `CONDITION` is re-evaluated each iteration.
-- Local identifier `loop` is available in the condition and body (`0`, `1`, `2`, ...).
-- Loop stops when condition evaluates to `0`.
-
-### 4) Function `for` statement
-
-Syntax:
-
-- `for ITERATOR from START to END do { FUNCTION_STATEMENTS }`
-- `for ITERATOR from START to END step STEP do { FUNCTION_STATEMENTS }`
-- `do` is optional before `{ ... }`.
-
-Behavior:
-
-- `ITERATOR` must be an identifier.
-- Default `STEP` is `1`.
-- `STEP = 0` is an error.
-- Positive step: iterate while `value <= END`.
-- Negative step: iterate while `value >= END`.
+`func` defines expression functions, but the function language itself (expression/function-body semantics) is documented in [../lang/README.md](../lang/README.md).
 
 ## Commands vs expression functions
 
@@ -205,6 +155,8 @@ Example:
 
 - `func add ( a, b ) { a + b }`
 - `eval add(3, 4)`
+
+For complete function-statement semantics, see [../lang/README.md](../lang/README.md).
 
 ## Runtime notes
 
