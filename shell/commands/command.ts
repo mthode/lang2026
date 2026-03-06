@@ -1,7 +1,7 @@
 import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
+import { renderTemplateVariables } from "../../lang/expression.js";
 import { splitArgumentSegments } from "../utils/arguments.js";
 import { executeBodyStatements } from "../utils/body.js";
-import { renderTemplateVariables } from "../utils/expression.js";
 import type {
   ShellCommandContext,
   ShellCommandExecutor,

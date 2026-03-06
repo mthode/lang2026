@@ -1,5 +1,6 @@
 import { extractNestedBlock } from "../../parser/index.js";
-import type { ShellCommandExecutor, ShellFunctionDefinition } from "./types.js";
+import type { LangFunctionDefinition } from "../../lang/types.js";
+import type { ShellCommandExecutor } from "./types.js";
 
 export const executeFuncCommand: ShellCommandExecutor = (command, _context, environment) => {
   const declaration = readRawVararg(command.args.declaration).join(" ").trim();
@@ -17,7 +18,7 @@ export const executeFuncCommand: ShellCommandExecutor = (command, _context, envi
   return undefined;
 };
 
-function parseFunctionDefinition(source: string): ShellFunctionDefinition {
+function parseFunctionDefinition(source: string): LangFunctionDefinition {
   const block = extractNestedBlock(source, 0);
   const header = source.slice(0, block.openIndex).trim();
   const trailing = source.slice(block.closeIndex + 1).trim();

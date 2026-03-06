@@ -1,5 +1,5 @@
 import type { ExpressionNode, NestedBlockNode } from "../../parser/index.js";
-import { evaluateShellExpression } from "../utils/expression.js";
+import { evaluateLangExpression } from "../../lang/expression.js";
 import { executeBodyStatements } from "../utils/body.js";
 import type { ShellCommandExecutor } from "./types.js";
 
@@ -19,6 +19,6 @@ export const executeIfCommand: ShellCommandExecutor = (command, context, environ
 };
 
 function evaluateConditionExpression(condition: ExpressionNode, environment: Parameters<ShellCommandExecutor>[2]): boolean {
-  const numeric = evaluateShellExpression(condition, environment);
+  const numeric = evaluateLangExpression(condition, environment);
   return numeric !== 0;
 }

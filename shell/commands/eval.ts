@@ -1,4 +1,4 @@
-import { evaluateShellExpression } from "../utils/expression.js";
+import { evaluateLangExpression } from "../../lang/expression.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 export const executeEvalCommand: ShellCommandExecutor = (command, _context, environment) => {
@@ -7,6 +7,6 @@ export const executeEvalCommand: ShellCommandExecutor = (command, _context, envi
     throw new Error("'eval' requires a single expression argument");
   }
 
-  const value = evaluateShellExpression(argument, environment);
+  const value = evaluateLangExpression(argument, environment);
   return String(value);
 };

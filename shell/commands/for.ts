@@ -1,7 +1,7 @@
 import type { ExpressionNode, NestedBlockNode } from "../../parser/index.js";
 import { executeBodyStatements } from "../utils/body.js";
-import { evaluateShellExpression } from "../utils/expression.js";
-import { withLocalVariables } from "../utils/local-scope.js";
+import { evaluateLangExpression } from "../../lang/expression.js";
+import { withLocalVariables } from "../../lang/local-scope.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
@@ -17,9 +17,9 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
   const stepExpr = (command.args.step as ExpressionNode | undefined) ?? { kind: "number", value: 1, raw: "1" };
   const body = command.args.do as NestedBlockNode;
 
-  const start = evaluateShellExpression(fromExpr, environment);
-  const end = evaluateShellExpression(toExpr, environment);
-  const step = evaluateShellExpression(stepExpr, environment);
+  const start = evaluateLangExpression(fromExpr, environment);
+  const end = evaluateLangExpression(toExpr, environment);
+  const step = evaluateLangExpression(stepExpr, environment);
 
   if (step === 0) {
     throw new Error("'for' step cannot be 0");

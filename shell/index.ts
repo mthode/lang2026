@@ -10,11 +10,11 @@ import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
-import { shellExpressionConfig } from "./expression-config.js";
+import { shellExpressionConfig } from "../lang/expression-config.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
-import { evaluateShellExpression, substituteStatementVariables } from "./utils/expression.js";
+import { evaluateLangExpression, substituteStatementVariables } from "../lang/expression.js";
 import { getCommandArgumentSource } from "../parser/index.js";
-export { evaluateShellExpression } from "./utils/expression.js";
+export { evaluateLangExpression as evaluateShellExpression } from "../lang/expression.js";
 
 const shellParserConfig: ParserConfig = {
   ...shellExpressionConfig,
@@ -130,7 +130,7 @@ export function executeShellSource(source: string, environment: ShellEnvironment
 
 export function executeShellCommand(statement: ShellStatementNode, environment: ShellEnvironment): string | undefined {
   if (statement.kind === "assignment") {
-    const value = evaluateShellExpression(statement.value, environment);
+    const value = evaluateLangExpression(statement.value, environment);
     environment.variables[statement.name] = value;
     return undefined;
   }

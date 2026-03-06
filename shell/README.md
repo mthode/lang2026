@@ -1,6 +1,8 @@
 # Shell language
 
-This directory defines shell parsing, statement execution, and expression-function execution.
+This directory defines shell parsing and command execution.
+
+Expression evaluation and function-body statement execution live in [lang/index.ts](../lang/index.ts).
 
 ## Statement model
 

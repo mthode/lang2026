@@ -1,10 +1,9 @@
 import type { CommandNode, ParserScope, StatementNode } from "../../parser/index.js";
+import type { ExpressionRuntimeEnvironment, LangFunctionDefinition } from "../../lang/types.js";
 
-export interface ShellEnvironment {
-  variables: Record<string, number>;
-  localVariables: Record<string, number>;
+export interface ShellEnvironment extends ExpressionRuntimeEnvironment {
   commands: Map<string, UserCommandDefinition>;
-  expressionFunctions: Map<string, ShellFunctionDefinition>;
+  expressionFunctions: Map<string, LangFunctionDefinition>;
   currentDirectory: string;
   executeOsCommand(command: string, args: string[]): string | undefined;
   changeDirectory(path: string, currentDirectory: string): string;
@@ -31,12 +30,6 @@ export interface UserCommandDefinition {
         valueCount: number;
       }
   >;
-  body: string;
-}
-
-export interface ShellFunctionDefinition {
-  name: string;
-  parameters: string[];
   body: string;
 }
 

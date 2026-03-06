@@ -1,5 +1,5 @@
 import type { ArgumentValue } from "../../parser/index.js";
-import { stringifyExpression } from "../utils/expression.js";
+import { stringifyExpression } from "../../lang/expression.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 function stringifyEchoValue(value: ArgumentValue): string {

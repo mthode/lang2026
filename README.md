@@ -4,6 +4,7 @@ A TypeScript project for a line-based command language with:
 
 - `scanner/` tokenization
 - `parser/` line + expression parsing to AST
+- `lang/` expression and function-statement evaluation
 - `repl/` shared REPL engine
 - `shell/` script execution runtime
 - `terminal/` node terminal integration
