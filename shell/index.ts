@@ -10,14 +10,14 @@ import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
-import { shellExpressionConfig } from "../lang/expression-config.js";
+import { expressionConfig } from "../lang/expression-config.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
 import { evaluateLangExpression, substituteStatementVariables } from "../lang/expression.js";
 import { getCommandArgumentSource } from "../parser/index.js";
 export { evaluateLangExpression as evaluateShellExpression } from "../lang/expression.js";
 
 const shellParserConfig: ParserConfig = {
-  ...shellExpressionConfig,
+  ...expressionConfig,
   allowAssignmentStatements: true,
   defaultCommand: {
     argumentKind: "raw",

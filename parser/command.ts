@@ -67,6 +67,63 @@ export interface CommandArgumentDefinition {
   nestedScope?: ParserScope;
 }
 
+export class ArgumentInfo {
+  readonly name: string;
+  readonly kind: ArgumentKind;
+  readonly positional: boolean;
+  readonly optional: boolean;
+  readonly vararg: boolean;
+  readonly expressionOperators?: ExpressionOperatorOverrides;
+  readonly nestedScope?: ParserScope;
+
+  constructor(definition: CommandArgumentDefinition) {
+    this.name = definition.name;
+    this.kind = definition.kind;
+    this.positional = definition.positional ?? false;
+    this.optional = definition.optional ?? false;
+    this.vararg = definition.vararg ?? false;
+    this.expressionOperators = definition.expressionOperators;
+    this.nestedScope = definition.nestedScope;
+  }
+
+  static fromDefinitions(definitions: CommandArgumentDefinition[]): ArgumentInfo[] {
+    return definitions.map((definition) => new ArgumentInfo(definition));
+  }
+
+  static validateOrdering(definitions: ArgumentInfo[]): void {
+    for (let index = 0; index < definitions.length; index += 1) {
+      const definition = definitions[index]!;
+      if (definition.vararg && (!definition.positional || index !== definitions.length - 1)) {
+        throw new Error(`Vararg argument '${definition.name}' must be the last positional argument`);
+      }
+    }
+  }
+
+  static remainingNamedStopNames(definitions: ArgumentInfo[], fromIndex: number): string[] {
+    return definitions
+      .slice(fromIndex + 1)
+      .filter((definition) => definition.isNamed())
+      .map((definition) => definition.name);
+  }
+
+  isNamed(): boolean {
+    return !this.positional;
+  }
+
+  isNestedBlock(): boolean {
+    return this.kind === "nested-block";
+  }
+
+  buildValueCommandDefinition(commandDefinition: Required<CommandDefinition>): Required<CommandDefinition> {
+    return {
+      ...commandDefinition,
+      argumentKind: this.kind,
+      consumeRestAsSingleArgument: true,
+      parseNamedArguments: false
+    };
+  }
+}
+
 export interface ParserConfig extends ExpressionParserConfig {
   allowAssignmentStatements?: boolean;
   commands?: Record<string, CommandDefinition>;
@@ -156,7 +213,7 @@ function parseArgumentValue(
   expressionConfig: ExpressionParserConfig,
   commandDefinition: Required<CommandDefinition>,
   lineOffset = 1,
-  argumentDefinition?: CommandArgumentDefinition,
+  argumentDefinition?: ArgumentInfo,
   nestedScope?: ParserScope
 ): ArgumentValue {
   if (commandDefinition.argumentKind === "nested-block") {
@@ -260,14 +317,14 @@ function parseNestedBlockValue(tokens: Token[], from: number, scope?: ParserScop
 function parseValueByKind(
   tokens: Token[],
   from: number,
-  definition: CommandArgumentDefinition,
+  definition: ArgumentInfo,
   stopNames: string[],
   expressionConfig: ExpressionParserConfig,
   commandDefinition: Required<CommandDefinition>,
   activeScope: ResolvedParserScope,
   lineOffset = 1
 ): { value: ArgumentValue; next: number } {
-  if (definition.kind === "nested-block") {
+  if (definition.isNestedBlock()) {
     const nestedScope = mergeScope(activeScope, definition.nestedScope);
     const parsed = parseNestedBlockValue(tokens, from, toParserScope(nestedScope));
     return { value: parsed.value, next: parsed.next };
@@ -280,12 +337,7 @@ function parseValueByKind(
   const value = parseArgumentValue(
     segment,
     expressionConfig,
-    {
-      ...commandDefinition,
-      argumentKind: definition.kind,
-      consumeRestAsSingleArgument: true,
-      parseNamedArguments: false
-    },
+    definition.buildValueCommandDefinition(commandDefinition),
     lineOffset,
     definition
   );
@@ -301,19 +353,16 @@ function parseCommandArgumentsByDefinition(
   lineOffset = 1
 ): CommandArguments {
   const args: CommandArguments = {};
-  const definitions = commandDefinition.arguments;
+  const definitions = ArgumentInfo.fromDefinitions(commandDefinition.arguments);
+  ArgumentInfo.validateOrdering(definitions);
   let cursor = 0;
 
   for (let index = 0; index < definitions.length; index += 1) {
     const definition = definitions[index]!;
 
-    if (definition.vararg && (!definition.positional || index !== definitions.length - 1)) {
-      throw new Error(`Vararg argument '${definition.name}' must be the last positional argument`);
-    }
-
     cursor = skipIgnorableTokens(tokens, cursor);
 
-    if (!definition.positional) {
+    if (definition.isNamed()) {
       const nextToken = tokens[cursor];
       const matchesName = nextToken?.type === "identifier" && nextToken.value === definition.name;
       if (!matchesName) {
@@ -333,16 +382,13 @@ function parseCommandArgumentsByDefinition(
       throw new Error(`Missing required argument '${definition.name}'`);
     }
 
-    const remainingNamedStops = definitions
-      .slice(index + 1)
-      .filter((def) => !def.positional)
-      .map((def) => def.name);
+    const remainingNamedStops = ArgumentInfo.remainingNamedStopNames(definitions, index);
 
     if (definition.vararg) {
       const values: ArgumentValue[] = [];
       let varargCursor = skipIgnorableTokens(tokens, cursor);
 
-      if (definition.kind === "nested-block") {
+      if (definition.isNestedBlock()) {
         while (varargCursor < tokens.length) {
           let parsed;
           try {
@@ -371,12 +417,7 @@ function parseCommandArgumentsByDefinition(
             parsedValue = parseArgumentValue(
               segment,
               expressionConfig,
-              {
-                ...commandDefinition,
-                argumentKind: definition.kind,
-                consumeRestAsSingleArgument: true,
-                parseNamedArguments: false
-              },
+              definition.buildValueCommandDefinition(commandDefinition),
               lineOffset,
               definition
             );

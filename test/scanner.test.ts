@@ -109,6 +109,33 @@ describe("scanner", () => {
     expect(tokens[3]).toMatchObject({ type: "newline", value: "\n", line: 2, column: 10, offset: 17 });
   });
 
+  it("terminates comments before a close bracket that would drop below start balance", () => {
+    const tokens = scan("(2 + 4 # this comment ) * 4");
+
+    const comment = tokens.find((token) => token.type === "comment");
+    expect(comment).toMatchObject({ type: "comment", value: "# this comment " });
+
+    const commentIndex = tokens.findIndex((token) => token.type === "comment");
+    expect(commentIndex).toBeGreaterThanOrEqual(0);
+    expect(tokens[commentIndex + 1]).toMatchObject({ type: "delimiter", value: ")" });
+  });
+
+  it("allows multiline comments while comment-local bracket balance is above start", () => {
+    const tokens = scan("eval 1 # comment opens {\nline two\nline three }\nnext");
+
+    const commentIndex = tokens.findIndex((token) => token.type === "comment");
+    expect(commentIndex).toBeGreaterThanOrEqual(0);
+    expect(tokens[commentIndex]).toMatchObject({
+      type: "comment",
+      value: "# comment opens {\nline two\nline three }"
+    });
+    expect(tokens[commentIndex + 1]).toMatchObject({ type: "newline", value: "\n" });
+
+    const nextIdentifier = tokens.find((token) => token.type === "identifier" && token.value === "next");
+    expect(nextIdentifier).toBeDefined();
+    expect(nextIdentifier).toMatchObject({ line: 4, column: 1 });
+  });
+
   it("treats tab, space and carriage return as whitespace with correct position", () => {
     const tokens = scan("\t \r\nx");
 

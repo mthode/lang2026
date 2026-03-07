@@ -23,6 +23,8 @@ export interface LogicalLine {
 
 const delimiterChars = new Set(["(", ")", "[", "]", "{", "}", ",", ".", ";"]);
 const operatorChars = new Set(["+", "-", "*", "/", "%", "=", "!", "<", ">", "&", "|", "^", "~", "?", ":"]);
+const openingBracketChars = new Set(["(", "[", "{"]);
+const closingBracketChars = new Set([")", "]", "}"]);
 
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\r";
@@ -46,6 +48,7 @@ export function scan(input: string): Token[] {
   let i = 0;
   let line = 1;
   let column = 1;
+  let bracketBalance = 0;
 
   const push = (type: TokenType, value: string, startLine: number, startColumn: number, offset: number): void => {
     tokens.push({ type, value, line: startLine, column: startColumn, offset });
@@ -89,6 +92,8 @@ export function scan(input: string): Token[] {
     }
 
     if (ch === "#" || (ch === "/" && input[i + 1] === "/")) {
+      const commentStartBalance = bracketBalance;
+      let commentBalance = commentStartBalance;
       let value = ch;
       i += 1;
       column += 1;
@@ -99,11 +104,45 @@ export function scan(input: string): Token[] {
         column += 1;
       }
 
-      while (i < input.length && input[i] !== "\n") {
-        value += input[i];
+      while (i < input.length) {
+        const curr = input[i] ?? "";
+
+        if (curr === "\n") {
+          if (commentBalance === commentStartBalance) {
+            break;
+          }
+          value += curr;
+          i += 1;
+          line += 1;
+          column = 1;
+          continue;
+        }
+
+        if (openingBracketChars.has(curr)) {
+          commentBalance += 1;
+          value += curr;
+          i += 1;
+          column += 1;
+          continue;
+        }
+
+        if (closingBracketChars.has(curr)) {
+          if (commentBalance - 1 < commentStartBalance) {
+            break;
+          }
+          commentBalance -= 1;
+          value += curr;
+          i += 1;
+          column += 1;
+          continue;
+        }
+
+        value += curr;
         i += 1;
         column += 1;
       }
+
+      bracketBalance = commentBalance;
 
       push("comment", value, startLine, startColumn, startOffset);
       continue;
@@ -180,6 +219,11 @@ export function scan(input: string): Token[] {
 
     if (delimiterChars.has(ch)) {
       push("delimiter", ch, startLine, startColumn, startOffset);
+      if (openingBracketChars.has(ch)) {
+        bracketBalance += 1;
+      } else if (closingBracketChars.has(ch)) {
+        bracketBalance -= 1;
+      }
       i += 1;
       column += 1;
       continue;

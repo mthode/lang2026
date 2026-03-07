@@ -1,6 +1,6 @@
 import { parseExpressionFromTokens, type ExpressionNode } from "../parser/index.js";
 import { scan, splitLogicalLinesWithMetadata } from "../scanner/index.js";
-import { shellExpressionConfig } from "./expression-config.js";
+import { expressionConfig } from "./expression-config.js";
 import { evaluateForStatement, parseForStatement, type ForStatement } from "./statements/for.js";
 import { evaluateIfStatement, parseIfStatement, type IfStatement } from "./statements/if.js";
 import { evaluateWhileStatement, parseWhileStatement, type WhileStatement } from "./statements/while.js";
@@ -150,5 +150,5 @@ function parseFunctionBodyStatement(source: string): FunctionBodyStatement {
 }
 
 function parseExpressionFromSource(source: string): ExpressionNode {
-  return parseExpressionFromTokens(scan(source), shellExpressionConfig);
+  return parseExpressionFromTokens(scan(source), expressionConfig);
 }

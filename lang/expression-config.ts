@@ -1,6 +1,6 @@
 import type { ExpressionParserConfig } from "../parser/index.js";
 
-export const shellExpressionConfig: ExpressionParserConfig = {
+export const expressionConfig: ExpressionParserConfig = {
   prefixOperators: {
     "+": { precedence: 9 },
     "-": { precedence: 9 },
