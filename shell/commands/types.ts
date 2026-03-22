@@ -1,4 +1,4 @@
-import type { CommandNode, ParserScope, StatementNode } from "../../parser/index.js";
+import type { CommandNode, ParserDefinition, StatementNode } from "../../parser/index.js";
 import type { ExpressionRuntimeEnvironment, LangFunctionDefinition } from "../../lang/types.js";
 
 export interface ShellEnvironment extends ExpressionRuntimeEnvironment {
@@ -50,8 +50,8 @@ export function createShellEnvironment(options: ShellEnvironmentOptions = {}): S
 }
 
 export interface ShellCommandContext {
-  parseScript(source: string, scope?: ParserScope): StatementNode[];
-  parseLine(source: string, environment: ShellEnvironment, startLine?: number, scope?: ParserScope): StatementNode;
+  parseScript(source: string, scope?: ParserDefinition): StatementNode[];
+  parseLine(source: string, environment: ShellEnvironment, startLine?: number, scope?: ParserDefinition): StatementNode;
   executeStatement(statement: StatementNode, environment: ShellEnvironment): string | undefined;
 }
 

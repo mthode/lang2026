@@ -1,4 +1,4 @@
-import { createParser, type CommandNode, type ParserConfig, type ParserScope, type StatementNode } from "../parser/index.js";
+import { createParser, type CommandNode, type ParserConfig, type ParserDefinition, type StatementNode } from "../parser/index.js";
 import { splitLogicalLinesWithMetadata } from "../scanner/index.js";
 import type { ReplCallbacks } from "../repl/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
@@ -89,9 +89,9 @@ const commandContext: ShellCommandContext = {
 
 export type ShellCommandNode = CommandNode;
 export type ShellStatementNode = StatementNode;
-export const parseShellLine = (source: string, startLine?: number, scope?: ParserScope) =>
+export const parseShellLine = (source: string, startLine?: number, scope?: ParserDefinition) =>
   shellParser.parseLine(source, startLine, scope);
-export const parseShellScript = (source: string, scope?: ParserScope) => shellParser.parseScript(source, scope);
+export const parseShellScript = (source: string, scope?: ParserDefinition) => shellParser.parseScript(source, scope);
 export const formatShellPrompt = (environment: ShellEnvironment): string => `${environment.currentDirectory}> `;
 
 export interface ShellSourceExecutionResult {
@@ -105,7 +105,7 @@ export function createShellReplCallbacks(environment: ShellEnvironment): ReplCal
   };
 }
 
-export function executeShellSource(source: string, environment: ShellEnvironment, scope?: ParserScope): ShellSourceExecutionResult {
+export function executeShellSource(source: string, environment: ShellEnvironment, scope?: ParserDefinition): ShellSourceExecutionResult {
   const statements = splitLogicalLinesWithMetadata(source);
   const outputs: string[] = [];
   let lastCommand: ShellCommandNode | undefined;

@@ -13,7 +13,7 @@ import {
   type PrefixOperatorDefinition
 } from "./expression.js";
 
-export interface ParserScope {
+export interface ParserDefinition {
   prefixOperators?: Record<string, PrefixOperatorDefinition>;
   infixOperators?: Record<string, InfixOperatorDefinition>;
   allowAssignmentStatements?: boolean;
@@ -25,7 +25,7 @@ export interface ParserScope {
 export interface NestedBlockNode {
   kind: "nested-block";
   content: string;
-  scope?: ParserScope;
+  scope?: ParserDefinition;
 }
 
 export type ArgumentValue = ExpressionNode | string | NestedBlockNode;
@@ -64,7 +64,7 @@ export interface CommandArgumentDefinition {
   optional?: boolean;
   vararg?: boolean;
   expressionOperators?: ExpressionOperatorOverrides;
-  nestedScope?: ParserScope;
+  nestedScope?: ParserDefinition;
 }
 
 export class ArgumentInfo {
@@ -74,7 +74,7 @@ export class ArgumentInfo {
   readonly optional: boolean;
   readonly vararg: boolean;
   readonly expressionOperators?: ExpressionOperatorOverrides;
-  readonly nestedScope?: ParserScope;
+  readonly nestedScope?: ParserDefinition;
 
   constructor(definition: CommandArgumentDefinition) {
     this.name = definition.name;
@@ -132,8 +132,8 @@ export interface ParserConfig extends ExpressionParserConfig {
 }
 
 export interface GenericParser {
-  parseLine(line: string, startLine?: number, scope?: ParserScope): StatementNode;
-  parseScript(input: string, scope?: ParserScope): StatementNode[];
+  parseLine(line: string, startLine?: number, scope?: ParserDefinition): StatementNode;
+  parseScript(input: string, scope?: ParserDefinition): StatementNode[];
 }
 
 interface ResolvedParserScope {
@@ -166,7 +166,7 @@ function resolveScopeFromConfig(config: ParserConfig): ResolvedParserScope {
   };
 }
 
-function mergeScope(base: ResolvedParserScope, override?: ParserScope): ResolvedParserScope {
+function mergeScope(base: ResolvedParserScope, override?: ParserDefinition): ResolvedParserScope {
   if (!override) {
     return base;
   }
@@ -187,7 +187,7 @@ function mergeScope(base: ResolvedParserScope, override?: ParserScope): Resolved
   };
 }
 
-function toParserScope(scope: ResolvedParserScope): ParserScope {
+function toParserScope(scope: ResolvedParserScope): ParserDefinition {
   return {
     prefixOperators: scope.prefixOperators,
     infixOperators: scope.infixOperators,
@@ -214,7 +214,7 @@ function parseArgumentValue(
   commandDefinition: Required<CommandDefinition>,
   lineOffset = 1,
   argumentDefinition?: ArgumentInfo,
-  nestedScope?: ParserScope
+  nestedScope?: ParserDefinition
 ): ArgumentValue {
   if (commandDefinition.argumentKind === "nested-block") {
     const text = tokens.map((token) => token.value).join("");
@@ -284,7 +284,7 @@ function findValueEndForDefinition(tokens: Token[], from: number, stopNames: str
   return tokens.length;
 }
 
-function parseNestedBlockValue(tokens: Token[], from: number, scope?: ParserScope): { value: NestedBlockNode; next: number } {
+function parseNestedBlockValue(tokens: Token[], from: number, scope?: ParserDefinition): { value: NestedBlockNode; next: number } {
   let cursor = skipIgnorableTokens(tokens, from);
 
   if (!tokens[cursor] || tokens[cursor]!.value !== "{") {
@@ -521,7 +521,7 @@ function splitArguments(tokens: Token[]): Token[][] {
 export function createParser(config: ParserConfig): GenericParser {
   const baseScope = resolveScopeFromConfig(config);
 
-  function parseLine(line: string, startLine = 1, scope?: ParserScope): StatementNode {
+  function parseLine(line: string, startLine = 1, scope?: ParserDefinition): StatementNode {
     const tokens = scan(line);
     const firstToken = tokens.find((token) => !isIgnorable(token));
 
@@ -579,7 +579,7 @@ export function createParser(config: ParserConfig): GenericParser {
     });
   }
 
-  function parseScript(input: string, scope?: ParserScope): StatementNode[] {
+  function parseScript(input: string, scope?: ParserDefinition): StatementNode[] {
     return splitLogicalLinesWithMetadata(input).map((line) => parseLine(line.content, line.startLine, scope));
   }
 

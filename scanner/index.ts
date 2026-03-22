@@ -217,6 +217,13 @@ export function scan(input: string): Token[] {
       continue;
     }
 
+    if (ch === "." && input[i + 1] === "." && input[i + 2] === ".") {
+      push("operator", "...", startLine, startColumn, startOffset);
+      i += 3;
+      column += 3;
+      continue;
+    }
+
     if (delimiterChars.has(ch)) {
       push("delimiter", ch, startLine, startColumn, startOffset);
       if (openingBracketChars.has(ch)) {

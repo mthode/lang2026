@@ -157,4 +157,39 @@ describe("scanner", () => {
     expect(lines[0]).toBe("eval (1 +\n 2)\n");
     expect(lines[1]).toBe("next");
   });
+
+  it("emits ... as a single operator token", () => {
+    const tokens = scan("...");
+    expect(tokens).toEqual([
+      { type: "operator", value: "...", line: 1, column: 1, offset: 0 },
+    ]);
+  });
+
+  it("emits a lone . as a delimiter token", () => {
+    const tokens = scan(".");
+    expect(tokens).toEqual([
+      { type: "delimiter", value: ".", line: 1, column: 1, offset: 0 },
+    ]);
+  });
+
+  it("emits .. as two delimiter tokens", () => {
+    const tokens = scan("..");
+    expect(tokens).toEqual([
+      { type: "delimiter", value: ".", line: 1, column: 1, offset: 0 },
+      { type: "delimiter", value: ".", line: 1, column: 2, offset: 1 },
+    ]);
+  });
+
+  it("does not treat ... inside a string literal as an operator", () => {
+    const tokens = scan('"..."');
+    expect(tokens).toEqual([
+      { type: "string", value: '"..."', line: 1, column: 1, offset: 0 },
+    ]);
+  });
+
+  it("emits ... with correct positions in context", () => {
+    const tokens = scan("cmd echo _ ... {");
+    const ellipsis = tokens.find((t) => t.value === "...");
+    expect(ellipsis).toMatchObject({ type: "operator", value: "...", line: 1, column: 12, offset: 11 });
+  });
 });
