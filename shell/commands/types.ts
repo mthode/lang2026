@@ -1,5 +1,6 @@
 import type { CommandNode, ParserDefinition, StatementNode } from "../../parser/index.js";
 import type { ExpressionRuntimeEnvironment, LangFunctionDefinition } from "../../lang/types.js";
+import type { CommandDeclaration } from "../../parser/declaration.js";
 
 export interface ShellEnvironment extends ExpressionRuntimeEnvironment {
   commands: Map<string, UserCommandDefinition>;
@@ -16,21 +17,7 @@ export interface ShellEnvironmentOptions {
 }
 
 export interface UserCommandDefinition {
-  name: string;
-  declarations: Array<
-    | {
-        name: string;
-        optional: boolean;
-        mode: "positional";
-      }
-    | {
-        name: string;
-        optional: boolean;
-        mode: "named";
-        valueCount: number;
-      }
-  >;
-  body: string;
+  declaration: CommandDeclaration;
 }
 
 export function createShellEnvironment(options: ShellEnvironmentOptions = {}): ShellEnvironment {

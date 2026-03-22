@@ -1,6 +1,7 @@
 export * from "./expression.js";
 export * from "./command.js";
 export * from "./declaration.js";
+export * from "./invocation.js";
 
 /*
 import { scan, splitLogicalLinesWithMetadata, type Token } from "../scanner/index.js";

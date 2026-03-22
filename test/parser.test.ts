@@ -4,6 +4,7 @@ import { parseShellLine, parseShellScript } from "../shell/index.js";
 import { parseCommandDeclaration } from "../parser/declaration.js";
 import { scan } from "../scanner/index.js";
 import { validateDeclaration } from "../parser/declaration.js";
+import { parseInvocation, validateInvocation } from "../parser/invocation.js";
 
 describe("parser", () => {
   const parser = createParser({
@@ -325,5 +326,141 @@ describe("parseCommandDeclaration", () => {
   it("validateDeclaration rejects nested vararg when ancestor has trailing named args", () => {
     const decl = parseCommandDeclaration(declarationTokens("cmd bad _ (child (sub ...)) ... dest { echo }"));
     expect(() => validateDeclaration(decl, new Set())).toThrowError("Nested keyword clauses cannot contain '...' when a higher-level clause contains trailing required positional declarations");
+  });
+});
+
+describe("parseInvocation", () => {
+  function declaration(source: string) {
+    const tokens = scan(source);
+    const cmdIndex = tokens.findIndex((token) => token.type === "identifier" && token.value === "cmd");
+    if (cmdIndex < 0) {
+      throw new Error("expected cmd declaration in test input");
+    }
+    return parseCommandDeclaration(tokens.slice(cmdIndex + 1));
+  }
+
+  function invocation(source: string) {
+    return scan(source);
+  }
+
+  it("parses simple positional invocation", () => {
+    const decl = declaration("cmd echo _ ... { }");
+    const parsed = parseInvocation(invocation("echo hello world"), decl);
+
+    expect(parsed.commandName).toBe("echo");
+    expect(parsed.arguments.varArgs).toEqual(["hello", "world"]);
+  });
+
+  it("parses named positional invocation", () => {
+    const decl = declaration("cmd greet name { }");
+    const parsed = parseInvocation(invocation("greet Alice"), decl);
+
+    expect(parsed.arguments.namedArgs).toEqual({ name: "Alice" });
+    expect(parsed.arguments.varArgs).toEqual([]);
+  });
+
+  it("parses keyed clause invocations", () => {
+    const decl = declaration("cmd send _ (to _) { } ");
+    const parsed = parseInvocation(invocation("send hello to admin"), decl);
+
+    expect(parsed.arguments.varArgs).toEqual(["hello"]);
+    expect(parsed.arguments.clauses.to).toHaveLength(1);
+    expect(parsed.arguments.clauses.to?.[0]?.varArgs).toEqual(["admin"]);
+  });
+
+  it("parses multiple keyed clause occurrences", () => {
+    const decl = declaration("cmd add (item _)+ { } ");
+    const parsed = parseInvocation(invocation("add item apple item banana"), decl);
+
+    expect(parsed.arguments.clauses.item).toHaveLength(2);
+    expect(parsed.arguments.clauses.item?.[0]?.varArgs).toEqual(["apple"]);
+    expect(parsed.arguments.clauses.item?.[1]?.varArgs).toEqual(["banana"]);
+  });
+
+  it("applies greedy vararg with trailing required named args", () => {
+    const decl = declaration("cmd cp _ ... destination { } ");
+    const parsed = parseInvocation(invocation("cp a b c dst"), decl);
+
+    expect(parsed.arguments.varArgs).toEqual(["a", "b", "c"]);
+    expect(parsed.arguments.namedArgs).toEqual({ destination: "dst" });
+  });
+
+  it("parses qualifiers as booleans", () => {
+    const decl = declaration("cmd verbose? cp _ ... { } ");
+
+    const withQualifier = parseInvocation(invocation("verbose cp a b"), decl);
+    expect(withQualifier.qualifiers).toEqual({ verbose: true });
+
+    const withoutQualifier = parseInvocation(invocation("cp a b"), decl);
+    expect(withoutQualifier.qualifiers).toEqual({ verbose: false });
+  });
+
+  it("treats quoted keyword tokens as values", () => {
+    const decl = declaration("cmd send _ (to _) { } ");
+    const parsed = parseInvocation(invocation("send \"to\" to admin"), decl);
+
+    expect(parsed.arguments.varArgs).toEqual(['"to"']);
+    expect(parsed.arguments.clauses.to?.[0]?.varArgs).toEqual(["admin"]);
+  });
+
+  it("throws for missing required args", () => {
+    const decl = declaration("cmd greet name { } ");
+    expect(() => parseInvocation(invocation("greet"), decl)).toThrowError("Missing required positional argument 'name'");
+  });
+
+  it("throws for keyword not valid in current context", () => {
+    const decl = declaration("cmd send _ (to (as _)) { } ");
+    expect(() => parseInvocation(invocation("send hello as role to admin"), decl)).toThrowError("Keyword 'as' is not valid in this context");
+  });
+
+  it("throws for too many positional arguments", () => {
+    const decl = declaration("cmd greet name { } ");
+    expect(() => parseInvocation(invocation("greet Alice Bob"), decl)).toThrowError("Too many positional arguments");
+  });
+});
+
+describe("validateInvocation", () => {
+  function declaration(source: string) {
+    const tokens = scan(source);
+    const cmdIndex = tokens.findIndex((token) => token.type === "identifier" && token.value === "cmd");
+    if (cmdIndex < 0) {
+      throw new Error("expected cmd declaration in test input");
+    }
+    return parseCommandDeclaration(tokens.slice(cmdIndex + 1));
+  }
+
+  function invocation(source: string) {
+    return scan(source);
+  }
+
+  it("accepts valid invocations", () => {
+    const decl = declaration("cmd send _ (to _)+ [cc _]* { } ");
+    const parsed = parseInvocation(invocation("send hello to admin cc team to backup"), decl);
+    expect(() => validateInvocation(parsed, decl)).not.toThrow();
+  });
+
+  it("rejects missing required keyed clause", () => {
+    const decl = declaration("cmd send _ (to _) { } ");
+    const parsed = parseInvocation(invocation("send hello"), decl);
+    expect(() => validateInvocation(parsed, decl)).toThrowError("Missing required clause 'to'");
+  });
+
+  it("rejects repeated single-use clauses", () => {
+    const decl = declaration("cmd send _ [cc _] { } ");
+    const parsed = parseInvocation(invocation("send hello cc one cc two"), decl);
+    expect(() => validateInvocation(parsed, decl)).toThrowError("Clause 'cc' may appear at most once");
+  });
+
+  it("rejects command/declaration mismatch", () => {
+    const sendDecl = declaration("cmd send _ { } ");
+    const cpDecl = declaration("cmd cp _ { } ");
+    const parsed = parseInvocation(invocation("send hello"), sendDecl);
+    expect(() => validateInvocation(parsed, cpDecl)).toThrowError("Expected command 'cp' but found 'send'");
+  });
+
+  it("rejects nested required clause omissions", () => {
+    const decl = declaration("cmd send _ (to _ (as _)) { } ");
+    const parsed = parseInvocation(invocation("send hello to admin"), decl);
+    expect(() => validateInvocation(parsed, decl)).toThrowError("Missing required clause 'as'");
   });
 });

@@ -1,6 +1,6 @@
-import { extractNestedBlock, getCommandArgumentSource } from "../../parser/index.js";
+import { parseCommandDeclaration, parseInvocation, validateDeclaration, validateInvocation } from "../../parser/index.js";
 import { renderTemplateVariables } from "../../lang/expression.js";
-import { splitArgumentSegments } from "../utils/arguments.js";
+import { scan } from "../../scanner/index.js";
 import { executeBodyStatements } from "../utils/body.js";
 import type {
   ShellCommandContext,
@@ -9,20 +9,19 @@ import type {
   UserCommandDefinition
 } from "./types.js";
 
-type CommandArgDeclaration = UserCommandDefinition["declarations"][number];
-
 export const executeCmdCommand: ShellCommandExecutor = (command, _context, environment) => {
   const declarationSource = readRawVararg(command.args.declaration).join(" ").trim();
   if (declarationSource.length === 0) {
     throw new Error("'cmd' requires: cmd COMMAND_NAME ARG_DECLS { COMMANDS }");
   }
 
-  const definition = parseCommandDefinition(declarationSource);
-  if (environment.expressionFunctions.has(definition.name)) {
-    throw new Error(`Cannot define command '${definition.name}': a function with that name already exists`);
+  const declaration = parseCommandDeclaration(scan(declarationSource));
+  if (environment.expressionFunctions.has(declaration.name)) {
+    throw new Error(`Cannot define command '${declaration.name}': a function with that name already exists`);
   }
 
-  environment.commands.set(definition.name, definition);
+  validateDeclaration(declaration, new Set(environment.commands.keys()));
+  environment.commands.set(declaration.name, { declaration });
   return undefined;
 };
 
@@ -37,148 +36,73 @@ export function executeUserCommand(
     return undefined;
   }
 
-  const remainder = getCommandArgumentSource(statementRaw);
-  const segments = splitArgumentSegments(remainder);
-  const invocation = parseCommandInvocationArguments(definition, segments, context, environment);
-  const resolvedBody = renderTemplateVariables(definition.body, invocation);
+  const invocation = parseInvocation(scan(statementRaw), definition.declaration);
+  validateInvocation(invocation, definition.declaration);
+
+  const renderedArgs = toTemplateVariables(invocation, definition);
+  const resolvedBody = renderTemplateVariables(definition.declaration.body.content, renderedArgs);
 
   const outputs = executeBodyStatements(resolvedBody, context, environment);
 
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 }
 
-function parseCommandDefinition(source: string): UserCommandDefinition {
-  const block = extractNestedBlock(source, 0);
-  const header = source.slice(0, block.openIndex).trim();
-  const trailing = source.slice(block.closeIndex + 1).trim();
-  if (trailing.length > 0) {
-    throw new Error("Unexpected content after command body");
-  }
-
-  const tokens = header.split(/\s+/).filter((token) => token.length > 0);
-  if (tokens.length === 0) {
-    throw new Error("Missing command name");
-  }
-
-  const [name, ...argTokens] = tokens;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`Invalid command name '${name}'`);
-  }
-
-  const declarations = argTokens.map(parseCommandArgToken);
-  return {
-    name,
-    declarations,
-    body: block.content
+function toTemplateVariables(
+  invocation: ReturnType<typeof parseInvocation>,
+  definition: UserCommandDefinition
+): Record<string, string | number | boolean | Array<string | number | boolean> | undefined> {
+  const output: Record<string, string | number | boolean | Array<string | number | boolean> | undefined> = {
+    ...invocation.qualifiers
   };
-}
 
-function parseCommandArgToken(token: string): CommandArgDeclaration {
-  const optional = token.startsWith("[") && token.endsWith("]");
-  const inner = optional ? token.slice(1, -1) : token;
-
-  if (inner.includes(":")) {
-    const [name, rawCount] = inner.split(":");
-    if (!name || !rawCount) {
-      throw new Error(`Invalid argument declaration '${token}'`);
+  const normalizeValue = (value: unknown): string | number | boolean | undefined => {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return value;
     }
 
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      throw new Error(`Invalid named argument declaration '${token}'`);
+    if (value && typeof value === "object" && "kind" in value && (value as { kind?: string }).kind === "nested-block") {
+      const blockValue = value as { content?: unknown };
+      return typeof blockValue.content === "string" ? blockValue.content : undefined;
     }
 
-    const valueCount = Number(rawCount);
-    if (!Number.isInteger(valueCount) || valueCount < 0) {
-      throw new Error(`Invalid NUM_ARGS in declaration '${token}'`);
-    }
-
-    return {
-      name,
-      optional,
-      mode: "named",
-      valueCount
-    };
-  }
-
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inner)) {
-    throw new Error(`Invalid positional argument declaration '${token}'`);
-  }
-
-  return {
-    name: inner,
-    optional,
-    mode: "positional"
+    return undefined;
   };
-}
 
-function parseCommandInvocationArguments(
-  definition: UserCommandDefinition,
-  segments: string[],
-  context: ShellCommandContext,
-  environment: ShellEnvironment
-): Record<string, string | string[] | boolean | undefined> {
-  const args: Record<string, string | string[] | boolean | undefined> = {};
-  let cursor = 0;
+  for (const [key, value] of Object.entries(invocation.arguments.namedArgs)) {
+    output[key] = normalizeValue(value);
+  }
 
-  for (const declaration of definition.declarations) {
-    if (declaration.mode === "positional") {
-      if (cursor >= segments.length) {
-        if (declaration.optional) {
-          args[declaration.name] = undefined;
-          continue;
-        }
-        throw new Error(`Missing required positional argument '${declaration.name}'`);
-      }
+  if (invocation.arguments.varArgs.length > 0) {
+    output.args = invocation.arguments.varArgs.map((value) => normalizeValue(value)).filter((v): v is string | number | boolean => v !== undefined);
+  }
 
-      const value = segments[cursor] ?? "";
-      validateExpression(value, declaration.name, context, environment);
-      args[declaration.name] = value;
-      cursor += 1;
+  for (const [keyword, occurrences] of Object.entries(invocation.arguments.clauses)) {
+    if (occurrences.length === 0) {
       continue;
     }
 
-    const token = segments[cursor] ?? "";
-    if (token !== declaration.name) {
-      if (declaration.optional) {
-        args[declaration.name] = declaration.valueCount === 0 ? false : undefined;
-        continue;
+    const scalars = occurrences.map((occurrence) => {
+      if (occurrence.varArgs.length === 1 && Object.keys(occurrence.namedArgs).length === 0) {
+        return normalizeValue(occurrence.varArgs[0]);
       }
-      throw new Error(`Missing required named argument '${declaration.name}'`);
-    }
+      return undefined;
+    });
 
-    cursor += 1;
-
-    if (declaration.valueCount === 0) {
-      args[declaration.name] = true;
+    if (occurrences.length === 1 && scalars[0] !== undefined) {
+      output[keyword] = scalars[0];
       continue;
     }
 
-    if (cursor + declaration.valueCount > segments.length) {
-      throw new Error(`Named argument '${declaration.name}' expects ${declaration.valueCount} values`);
+    const packed = scalars.filter((value): value is string | number | boolean => value !== undefined);
+    if (packed.length > 0) {
+      output[keyword] = packed;
     }
-
-    const values = segments.slice(cursor, cursor + declaration.valueCount);
-    values.forEach((value, index) => validateExpression(value, `${declaration.name}[${index}]`, context, environment));
-    cursor += declaration.valueCount;
-
-    args[declaration.name] = declaration.valueCount === 1 ? values[0] : values;
   }
 
-  if (cursor < segments.length) {
-    throw new Error("Unexpected extra arguments when calling command");
-  }
+  // Keep command body rendering rooted in the declaration that produced this invocation.
+  output.command = definition.declaration.name;
 
-  return args;
-}
-
-function validateExpression(source: string, argName: string, context: ShellCommandContext, environment: ShellEnvironment): void {
-  try {
-    const statement = context.parseLine(`eval ${source}`, environment);
-    context.executeStatement(statement, environment);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid expression for argument '${argName}': ${message}`);
-  }
+  return output;
 }
 
 function readRawVararg(value: unknown): string[] {

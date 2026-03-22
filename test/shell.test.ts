@@ -118,7 +118,7 @@ describe("shell eval command", () => {
 
   it("supports optional positional function arguments", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("cmd show a [b] { echo $a }"), environment);
+    executeShellCommand(parseShellLine("cmd show a b? { echo $a }"), environment);
     const call = parseShellLine("show 10");
     const callOutput = executeShellCommand(call, environment);
     expect(callOutput).toBe("10");
@@ -126,16 +126,16 @@ describe("shell eval command", () => {
 
   it("supports named function args and flags", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("cmd cfg flag:0 x:1 y:2 { echo $flag $x $y }"), environment);
-    const call = parseShellLine("cfg flag x 7 y 8 9");
+    executeShellCommand(parseShellLine("cmd cfg x y z [flag _]* { echo $flag $x $y $z }"), environment);
+    const call = parseShellLine("cfg 7 8 9 flag true");
     const callOutput = executeShellCommand(call, environment);
     expect(callOutput).toBe("true 7 8 9");
   });
 
   it("validates named argument arity in function calls", () => {
     const environment = createShellEnvironment();
-    executeShellCommand(parseShellLine("cmd cfg2 x:2 { echo $x }"), environment);
-    expect(() => executeShellCommand(parseShellLine("cfg2 x 1"), environment)).toThrowError("expects 2 values");
+    executeShellCommand(parseShellLine("cmd cfg2 (x _ _) { echo $x }"), environment);
+    expect(() => executeShellCommand(parseShellLine("cfg2 x 1"), environment)).toThrowError("Missing required positional argument '_'");
   });
 
   it("while loops while condition is non-zero", () => {
