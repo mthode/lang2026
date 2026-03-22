@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createParser } from "../parser/index.js";
 import { parseShellLine, parseShellScript } from "../shell/index.js";
+import { parseCommandDeclaration } from "../parser/declaration.js";
+import { scan } from "../scanner/index.js";
 
 describe("parser", () => {
   const parser = createParser({
@@ -237,5 +239,75 @@ describe("parser", () => {
     expect(nested.name).toBe("only");
 
     expect(() => nestedParser.parseLine("inner", 1, body.scope)).toThrowError("Unknown command 'inner'");
+  });
+});
+
+describe("parseCommandDeclaration", () => {
+  function declarationTokens(source: string) {
+    const tokens = scan(source);
+    const cmdIndex = tokens.findIndex((token) => token.type === "identifier" && token.value === "cmd");
+    if (cmdIndex < 0) {
+      throw new Error("expected cmd declaration in test input");
+    }
+    return tokens.slice(cmdIndex + 1);
+  }
+
+  it("parses command with no arguments", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd noop { echo hi }"));
+
+    expect(decl.name).toBe("noop");
+    expect(decl.qualifiers).toEqual([]);
+    expect(decl.argDecls).toEqual({ positional: [], keyedClauses: [], vararg: undefined });
+    expect(decl.body.content).toBe("echo hi");
+    expect([...decl.globalKeywords]).toEqual([]);
+  });
+
+  it("parses positional args, optional args, keyed clauses, and vararg trailing names", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd verbose? cp _ src? (to _) [mode name]* ... destination { echo hi }"));
+
+    expect(decl.name).toBe("cp");
+    expect(decl.qualifiers).toEqual([{ keyword: "verbose" }]);
+    expect(decl.argDecls.positional).toEqual([
+      { kind: "unnamed", name: undefined, optional: false },
+      { kind: "named", name: "src", optional: true }
+    ]);
+    expect(decl.argDecls.keyedClauses).toHaveLength(2);
+    expect(decl.argDecls.keyedClauses[0]).toMatchObject({ keyword: "to", required: true, allowMultiple: false });
+    expect(decl.argDecls.keyedClauses[1]).toMatchObject({ keyword: "mode", required: false, allowMultiple: true });
+    expect(decl.argDecls.vararg).toEqual({ trailingNamedArgs: ["destination"] });
+    expect([...decl.globalKeywords]).toEqual(["to", "mode"]);
+  });
+
+  it("parses nested keyed clauses", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd move (from _ (within _)) (to _) { echo hi }"));
+
+    expect(decl.argDecls.keyedClauses).toHaveLength(2);
+    const fromClause = decl.argDecls.keyedClauses[0];
+    expect(fromClause?.keyword).toBe("from");
+    expect(fromClause?.argDecls.keyedClauses).toHaveLength(1);
+    expect(fromClause?.argDecls.keyedClauses[0]?.keyword).toBe("within");
+    expect([...decl.globalKeywords]).toEqual(["from", "within", "to"]);
+  });
+
+  it("throws for duplicate keyed clause keywords", () => {
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken (to _) [to _] { echo hi }"))
+    ).toThrowError("Duplicate keyed clause keyword 'to'");
+  });
+
+  it("throws for invalid quantifier placement", () => {
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken (to _)* { echo hi }"))
+    ).toThrowError("Invalid quantifier '*'");
+
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken [to _]+ { echo hi }"))
+    ).toThrowError("Invalid quantifier '+'");
+  });
+
+  it("throws when there is content after the body", () => {
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken { echo hi } trailing"))
+    ).toThrowError("Unexpected content after command body");
   });
 });
