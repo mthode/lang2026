@@ -9,6 +9,7 @@ import { executeFuncCommand } from "./commands/function.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
+import { translateBuiltInInvocation } from "./commands/builtin-invocation.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
 import { expressionConfig } from "../lang/expression-config.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
@@ -137,7 +138,7 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
 
   const commandExecutor = commandExecutors[statement.name];
   if (commandExecutor) {
-    return commandExecutor(statement, commandContext, environment);
+    return commandExecutor(translateBuiltInInvocation(statement), commandContext, environment);
   }
 
   if (environment.commands.has(statement.name)) {

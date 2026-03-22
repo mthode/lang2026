@@ -3,8 +3,9 @@ import { splitArgumentSegments } from "../utils/arguments.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 export const executeCdCommand: ShellCommandExecutor = (command, _context, environment) => {
+  const fromTranslated = typeof command.args.path === "string" ? [command.args.path] : undefined;
   const remainder = getCommandArgumentSource(command.raw);
-  const args = splitArgumentSegments(remainder, { decodeStringLiterals: true });
+  const args = fromTranslated ?? splitArgumentSegments(remainder, { decodeStringLiterals: true });
 
   if (args.length === 0) {
     throw new Error("'cd' requires a target path");

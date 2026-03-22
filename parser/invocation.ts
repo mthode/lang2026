@@ -19,10 +19,11 @@ function splitInvocationSegments(tokens: Token[]): InvocationSegment[] {
   let depth = 0;
 
   for (const token of tokens) {
+    const wasTopLevel = depth === 0;
     if (token.value === "(" || token.value === "[" || token.value === "{") depth += 1;
     if (token.value === ")" || token.value === "]" || token.value === "}") depth = Math.max(0, depth - 1);
 
-    if (depth === 0 && isIgnorable(token)) {
+    if (wasTopLevel && isIgnorable(token)) {
       if (current.length > 0) {
         segments.push(current);
         current = [];
@@ -30,9 +31,7 @@ function splitInvocationSegments(tokens: Token[]): InvocationSegment[] {
       continue;
     }
 
-    if (!isIgnorable(token)) {
-      current.push(token);
-    }
+    current.push(token);
   }
 
   if (current.length > 0) {
