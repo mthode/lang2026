@@ -307,3 +307,40 @@ export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
     globalKeywords
   };
 }
+
+export function validateDeclaration(decl: CommandDeclaration, existingCommandNames: Set<string>): void {
+  // Qualifier collisions with existing command names or clause keywords
+  for (const q of decl.qualifiers) {
+    if (existingCommandNames.has(q.keyword)) {
+      throw new Error(`Qualifier keyword '${q.keyword}' collides with existing command name`);
+    }
+    if (decl.globalKeywords.has(q.keyword)) {
+      throw new Error(`Qualifier keyword '${q.keyword}' collides with a keyed clause keyword`);
+    }
+  }
+
+  // If a group has vararg with trailing named args, no descendant may contain a vararg
+  function descHasVararg(group: ArgDeclGroup): boolean {
+    if (group.vararg) return true;
+    for (const clause of group.keyedClauses) {
+      if (descHasVararg(clause.argDecls)) return true;
+    }
+    return false;
+  }
+
+  function checkNestedVararg(group: ArgDeclGroup): void {
+    if (group.vararg && group.vararg.trailingNamedArgs.length > 0) {
+      for (const clause of group.keyedClauses) {
+        if (descHasVararg(clause.argDecls)) {
+          throw new Error("Nested keyword clauses cannot contain '...' when a higher-level clause contains trailing required positional declarations");
+        }
+      }
+    }
+
+    for (const clause of group.keyedClauses) {
+      checkNestedVararg(clause.argDecls);
+    }
+  }
+
+  checkNestedVararg(decl.argDecls);
+}

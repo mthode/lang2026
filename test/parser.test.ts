@@ -3,6 +3,7 @@ import { createParser } from "../parser/index.js";
 import { parseShellLine, parseShellScript } from "../shell/index.js";
 import { parseCommandDeclaration } from "../parser/declaration.js";
 import { scan } from "../scanner/index.js";
+import { validateDeclaration } from "../parser/declaration.js";
 
 describe("parser", () => {
   const parser = createParser({
@@ -309,5 +310,20 @@ describe("parseCommandDeclaration", () => {
     expect(() =>
       parseCommandDeclaration(declarationTokens("cmd broken { echo hi } trailing"))
     ).toThrowError("Unexpected content after command body");
+  });
+
+  it("validateDeclaration rejects qualifier colliding with existing command name", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd verbose? cp { }"));
+    expect(() => validateDeclaration(decl, new Set(["verbose"]))).toThrowError("Qualifier keyword 'verbose' collides with existing command name");
+  });
+
+  it("validateDeclaration rejects qualifier colliding with keyed clause keyword", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd verbose? cp (verbose _) { }"));
+    expect(() => validateDeclaration(decl, new Set())).toThrowError("Qualifier keyword 'verbose' collides with a keyed clause keyword");
+  });
+
+  it("validateDeclaration rejects nested vararg when ancestor has trailing named args", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd bad _ (child (sub ...)) ... dest { echo }"));
+    expect(() => validateDeclaration(decl, new Set())).toThrowError("Nested keyword clauses cannot contain '...' when a higher-level clause contains trailing required positional declarations");
   });
 });
