@@ -15,20 +15,24 @@ export async function startTerminalRepl(io: TerminalIo): Promise<void> {
     changeDirectory: (path, currentDirectory) => resolveNodeDirectory(path, currentDirectory)
   });
   const engine = new ReplEngine(createShellReplCallbacks(environment));
+  let continuationLevel = 0;
 
   try {
     while (true) {
-      const line = await io.read(formatShellPrompt(environment));
+      const prompt = continuationLevel > 0 ? `${"+".repeat(continuationLevel)}> ` : formatShellPrompt(environment);
+      const line = await io.read(prompt);
       if (line.trim() === ".exit") {
         break;
       }
 
       try {
         const result = await engine.evaluate(line);
+        continuationLevel = result.pending ? engine.getContinuationLevel() : 0;
         if (result.output) {
           io.write(`${result.output}\n`);
         }
       } catch (error) {
+        continuationLevel = 0;
         if (error instanceof Error) {
           io.write(`${error.message}\n`);
           io.write(`${error.stack ?? error.message}\n`);

@@ -34,4 +34,23 @@ describe("terminal repl", () => {
     expect(io.output).toContain(`OS command not found: ${missingCommand}`);
     expect(io.output).toContain("at ");
   });
+
+  it("uses '+' continuation prompt for multiline bracket input", async () => {
+    const io = new FakeIo(["eval (1 +", "2)", ".exit"]);
+
+    await startTerminalRepl(io);
+
+    expect(io.prompts.length).toBe(3);
+    expect(io.prompts[1]).toBe("+> ");
+  });
+
+  it("uses one '+' per nested bracket level", async () => {
+    const io = new FakeIo(["eval ((1 +", "2)", "3)", ".exit"]);
+
+    await startTerminalRepl(io);
+
+    expect(io.prompts.length).toBe(4);
+    expect(io.prompts[1]).toBe("++> ");
+    expect(io.prompts[2]).toBe("+> ");
+  });
 });

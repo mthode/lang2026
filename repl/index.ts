@@ -30,6 +30,15 @@ export class ReplEngine<TCommand = unknown> {
     return this.history;
   }
 
+  getContinuationLevel(): number {
+    if (this.pendingInput.length === 0) {
+      return 0;
+    }
+
+    const bracketBalance = getBracketBalance(this.pendingInput);
+    return bracketBalance > 0 ? bracketBalance : 1;
+  }
+
   navigateHistory(direction: "up" | "down", currentInput: string): string {
     if (this.history.length === 0) {
       return currentInput;
@@ -76,7 +85,7 @@ export class ReplEngine<TCommand = unknown> {
     const source = this.pendingInput;
     this.pendingInput = "";
 
-  this.history.push(source);
+    this.history.push(source);
 
     const result = await this.callbacks.execute(source);
 
@@ -96,6 +105,12 @@ function needsContinuation(input: string): boolean {
     return true;
   }
 
+  const bracketBalance = getBracketBalance(input);
+
+  return bracketBalance > 0;
+}
+
+function getBracketBalance(input: string): number {
   const tokens = scan(input);
   let bracketBalance = 0;
 
@@ -105,5 +120,5 @@ function needsContinuation(input: string): boolean {
     if (token.value === ")" || token.value === "]" || token.value === "}") bracketBalance -= 1;
   }
 
-  return bracketBalance > 0;
+  return bracketBalance;
 }

@@ -116,6 +116,16 @@ describe("shell eval command", () => {
     expect(callOutput).toBe("5");
   });
 
+  it("supports numeric positional placeholders in user commands", () => {
+    const environment = createShellEnvironment();
+    executeShellCommand(parseShellLine("cmd addp a b { eval $1 + $2 }"), environment);
+
+    const call = parseShellLine("addp 2 3");
+    const callOutput = executeShellCommand(call, environment);
+
+    expect(callOutput).toBe("5");
+  });
+
   it("supports optional positional function arguments", () => {
     const environment = createShellEnvironment();
     executeShellCommand(parseShellLine("cmd show a b? { echo $a }"), environment);

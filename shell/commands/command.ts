@@ -72,6 +72,28 @@ function toTemplateVariables(
     output[key] = normalizeValue(value);
   }
 
+  // Provide 1-based positional aliases so command bodies can reference $1, $2, ...
+  const positionalValues: Array<string | number | boolean | undefined> = [];
+  let unnamedIndex = 0;
+
+  for (const declaration of definition.declaration.argDecls.positional) {
+    if (declaration.kind === "named" && declaration.name) {
+      positionalValues.push(normalizeValue(invocation.arguments.namedArgs[declaration.name]));
+      continue;
+    }
+
+    positionalValues.push(normalizeValue(invocation.arguments.varArgs[unnamedIndex]));
+    unnamedIndex += 1;
+  }
+
+  for (let i = unnamedIndex; i < invocation.arguments.varArgs.length; i += 1) {
+    positionalValues.push(normalizeValue(invocation.arguments.varArgs[i]));
+  }
+
+  for (let i = 0; i < positionalValues.length; i += 1) {
+    output[String(i + 1)] = positionalValues[i];
+  }
+
   if (invocation.arguments.varArgs.length > 0) {
     output.args = invocation.arguments.varArgs.map((value) => normalizeValue(value)).filter((v): v is string | number | boolean => v !== undefined);
   }
