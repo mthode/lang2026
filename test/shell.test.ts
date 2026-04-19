@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createLanguage } from "../parser/index.js";
 import { createShellEnvironment, executeShellCommand, executeShellSource, parseShellLine } from "../shell/index.js";
 import {
   SHELL_COMMAND_SET_NAME,
@@ -48,6 +49,137 @@ describe("shell eval command", () => {
     expect(() =>
       registerStatementSet(environment.statementSets, SHELL_STATEMENT_SET_NAME, shellStatementSet)
     ).toThrowError(`Cannot redefine statement set '${SHELL_STATEMENT_SET_NAME}'`);
+  });
+
+  it("declares operator, command, and statement sets", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("opset math_ops { prefix ! precedence 9 infix %% precedence 7 left }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmdset calc_cmds { echo eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset calc_stmt commands calc_cmds operators math_ops"),
+      environment
+    );
+
+    expect(environment.operatorSets.get("math_ops")).toMatchObject({
+      prefixOperators: {
+        "!": { precedence: 9 }
+      },
+      infixOperators: {
+        "%%": { precedence: 7, associativity: "left" }
+      }
+    });
+    expect(environment.commandSets.get("calc_cmds")).toMatchObject({
+      strictCommands: true
+    });
+    expect(environment.commandSets.get("calc_cmds")?.commands.echo).toBeDefined();
+    expect(environment.commandSets.get("calc_cmds")?.commands.eval).toBeDefined();
+    expect(environment.statementSets.get("calc_stmt")).toMatchObject({
+      commandSet: {
+        strictCommands: true
+      },
+      operatorSet: {
+        prefixOperators: {
+          "!": { precedence: 9 }
+        }
+      }
+    });
+  });
+
+  it("rejects duplicate opset, cmdset, and stmtset declarations", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("opset shell_ops { prefix ! precedence 9 }"),
+        environment
+      )
+    ).toThrowError(`Cannot redefine operator set '${SHELL_OPERATOR_SET_NAME}'`);
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmdset shell_cmds { echo }"),
+        environment
+      )
+    ).toThrowError(`Cannot redefine command set '${SHELL_COMMAND_SET_NAME}'`);
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("stmtset shell_stmt commands shell_cmds operators shell_ops"),
+        environment
+      )
+    ).toThrowError(`Cannot redefine statement set '${SHELL_STATEMENT_SET_NAME}'`);
+  });
+
+  it("rejects unknown command references in cmdset declarations", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmdset broken_cmds { echo missing_command }"),
+        environment
+      )
+    ).toThrowError("Unknown command 'missing_command'");
+  });
+
+  it("rejects unsupported cmdset body constructs explicitly", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmdset composed_cmds { import echo }"),
+        environment
+      )
+    ).toThrowError("Unsupported command set construct 'import'");
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmdset dup_cmds { echo echo }"),
+        environment
+      )
+    ).toThrowError("Duplicate command 'echo' in command set body");
+  });
+
+  it("rejects unsupported opset body constructs explicitly", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("opset bad_ops { postfix ! precedence 9 }"),
+        environment
+      )
+    ).toThrowError("Unsupported operator definition kind 'postfix'");
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("opset bad_ops { infix + precedence 7 center }"),
+        environment
+      )
+    ).toThrowError("Unsupported infix associativity 'center'");
+  });
+
+  it("rejects unknown named set references in stmtset declarations", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("stmtset broken_stmt commands missing_cmds operators shell_ops"),
+        environment
+      )
+    ).toThrowError("Unknown command set 'missing_cmds'");
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("stmtset broken_stmt commands shell_cmds operators missing_ops"),
+        environment
+      )
+    ).toThrowError("Unknown operator set 'missing_ops'");
   });
 
   it("parses eval expression with spaces as a single argument", () => {
@@ -164,6 +296,193 @@ describe("shell eval command", () => {
     expect(callOutput).toBe("5");
   });
 
+  it("uses selected operator sets when invoking user commands", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("opset math_ops { infix + precedence 7 left }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd --evaluate math_ops show value { eval $value }"),
+      environment
+    );
+
+    const output = executeShellCommand(parseShellLine("show 1 + 2"), environment);
+    expect(output).toBe("3");
+  });
+
+  it("executes command bodies in the selected statement set", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("cmdset eval_only { eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset eval_stmt commands eval_only operators shell_ops"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd calc value { eval $value } :: eval_stmt"),
+      environment
+    );
+
+    const output = executeShellCommand(parseShellLine("calc 3"), environment);
+    expect(output).toBe("3");
+  });
+
+  it("rejects unsupported commands inside a custom command body language", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("cmdset eval_only { eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset eval_stmt commands eval_only operators shell_ops"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd broken { echo nope } :: eval_stmt"),
+      environment
+    );
+
+    expect(() => executeShellCommand(parseShellLine("broken"), environment)).toThrowError("Unknown command 'echo'");
+  });
+
+  it("inherits the selected statement set into nested blocks inside command bodies", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("cmdset if_eval_only { if eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset if_eval_stmt commands if_eval_only operators shell_ops"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd nested { if 1 then { echo nope } } :: if_eval_stmt"),
+      environment
+    );
+
+    expect(() => executeShellCommand(parseShellLine("nested"), environment)).toThrowError("Unknown command 'echo'");
+  });
+
+  it("resolves named operator and statement sets when defining commands", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("opset math_ops { infix %% precedence 7 left }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmdset eval_only { eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset eval_stmt commands eval_only operators math_ops"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd --evaluate math_ops calc { eval 1 %% 2 } :: eval_stmt"),
+      environment
+    );
+
+    const definition = environment.commands.get("calc");
+    expect(definition?.argumentOperatorSet).toMatchObject({
+      infixOperators: {
+        "%%": { precedence: 7, associativity: "left" }
+      }
+    });
+    expect(definition?.bodyLanguage).toMatchObject({
+      commandSet: {
+        strictCommands: true
+      }
+    });
+    expect(definition?.bodyLanguage?.commandSet.commands.eval).toBeDefined();
+  });
+
+  it("rejects unknown named set references when defining commands", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmd --evaluate missing_ops broken { echo hi }"),
+        environment
+      )
+    ).toThrowError("Unknown operator set 'missing_ops'");
+
+    expect(() =>
+      executeShellCommand(
+        parseShellLine("cmd broken { echo hi } :: missing_stmt"),
+        environment
+      )
+    ).toThrowError("Unknown statement set 'missing_stmt'");
+  });
+
+  it("captures resolved body language at command declaration time", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(
+      parseShellLine("opset math_ops { infix %% precedence 7 left }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmdset eval_only { eval }"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("stmtset eval_stmt commands eval_only operators math_ops"),
+      environment
+    );
+    executeShellCommand(
+      parseShellLine("cmd --evaluate math_ops calc { eval 1 %% 2 } :: eval_stmt"),
+      environment
+    );
+
+    const definition = environment.commands.get("calc");
+    expect(definition?.argumentOperatorSet?.infixOperators["%%"]).toMatchObject({
+      precedence: 7,
+      associativity: "left"
+    });
+    expect(definition?.bodyLanguage?.commandSet.commands.eval).toBeDefined();
+
+    const shellCommands = environment.commandSets.get(SHELL_COMMAND_SET_NAME);
+    const shellOperators = environment.operatorSets.get(SHELL_OPERATOR_SET_NAME);
+    if (!shellCommands || !shellOperators) {
+      throw new Error("expected seeded shell language registries");
+    }
+
+    environment.statementSets.set(
+      "eval_stmt",
+      createLanguage({
+        commandSet: {
+          commands: {
+            echo: shellCommands.commands.echo!
+          },
+          strictCommands: true
+        },
+        operatorSet: shellOperators
+      })
+    );
+    environment.operatorSets.set("math_ops", {
+      prefixOperators: {},
+      infixOperators: {
+        "@@": { precedence: 3, associativity: "right" }
+      }
+    });
+
+    expect(definition?.argumentOperatorSet?.infixOperators["%%"]).toMatchObject({
+      precedence: 7,
+      associativity: "left"
+    });
+    expect(definition?.argumentOperatorSet?.infixOperators["@@"]).toBeUndefined();
+    expect(definition?.bodyLanguage?.commandSet.commands.eval).toBeDefined();
+    expect(definition?.bodyLanguage?.commandSet.commands.echo).toBeUndefined();
+  });
+
   it("supports numeric positional placeholders in user commands", () => {
     const environment = createShellEnvironment();
     executeShellCommand(parseShellLine("cmd addp a b { eval $1 + $2 }"), environment);
@@ -249,6 +568,44 @@ describe("shell eval command", () => {
     const result = executeShellSource("x = 5\necho $x", environment);
 
     expect(result.output).toBe("5");
+  });
+
+  it("rejects unknown set names in end-to-end shell source execution", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellSource(
+        "cmd --evaluate missing_ops broken value { eval $value }",
+        environment
+      )
+    ).toThrowError("Unknown operator set 'missing_ops'");
+  });
+
+  it("rejects invalid body annotations in end-to-end shell source execution", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellSource(
+        "cmd broken { echo hi } ::",
+        environment
+      )
+    ).toThrowError("Expected statement set name after '::'");
+  });
+
+  it("rejects disallowed commands inside custom statement sets in end-to-end shell source execution", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      executeShellSource(
+        [
+          "cmdset eval_only { eval }",
+          "stmtset eval_stmt commands eval_only operators shell_ops",
+          "cmd broken { echo nope } :: eval_stmt",
+          "broken"
+        ].join("\n"),
+        environment
+      )
+    ).toThrowError("Unknown command 'echo'");
   });
 
   it("routes unknown commands to OS executor with raw arguments", () => {

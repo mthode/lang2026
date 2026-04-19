@@ -31,9 +31,11 @@ export interface ArgDeclGroup {
 
 export interface CommandDeclaration {
   name: string;
+  argumentOperatorSetName?: string;
   qualifiers: QualifierDecl[];
   argDecls: ArgDeclGroup;
   body: NestedBlockNode;
+  bodyStatementSetName?: string;
   globalKeywords: Set<string>;
 }
 
@@ -98,6 +100,58 @@ function describeToken(token: Token | undefined): string {
     return "end of declaration";
   }
   return `'${token.value}'`;
+}
+
+function parseEvaluateAnnotation(state: DeclarationParserState): string | undefined {
+  const marker = peekNonIgnorable(state);
+  const keyword = peekNonIgnorable(state, 1);
+
+  if (marker?.value !== "--" || !isIdentifierToken(keyword) || keyword.value !== "evaluate") {
+    return undefined;
+  }
+
+  consumeNonIgnorable(state);
+  consumeNonIgnorable(state);
+
+  const nameToken = consumeNonIgnorable(state);
+  if (!isIdentifierToken(nameToken) || nameToken.value === "_") {
+    throw new Error("Expected operator set name after '--evaluate'");
+  }
+
+  const repeatedMarker = peekNonIgnorable(state);
+  const repeatedKeyword = peekNonIgnorable(state, 1);
+  if (repeatedMarker?.value === "--" && isIdentifierToken(repeatedKeyword) && repeatedKeyword.value === "evaluate") {
+    throw new Error("Repeated '--evaluate' annotation");
+  }
+
+  return nameToken.value;
+}
+
+function parseBodyStatementAnnotation(tokens: Token[]): string | undefined {
+  const trailingTokens = tokens.filter((token) => !isIgnorable(token));
+  if (trailingTokens.length === 0) {
+    return undefined;
+  }
+
+  const marker = trailingTokens[0];
+  if (marker?.value !== "::") {
+    throw new Error("Unexpected content after command body");
+  }
+
+  const nameToken = trailingTokens[1];
+  if (!isIdentifierToken(nameToken) || nameToken.value === "_") {
+    throw new Error("Expected statement set name after '::'");
+  }
+
+  if (trailingTokens.length === 2) {
+    return nameToken.value;
+  }
+
+  if (trailingTokens[2]?.value === "::") {
+    throw new Error("Repeated body annotation ':: Name'");
+  }
+
+  throw new Error("Unexpected content after command body");
 }
 
 function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | undefined): ArgDeclGroup {
@@ -254,6 +308,7 @@ function findBlockCloseTokenIndex(tokens: Token[], openIndex: number): number {
 
 export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
   const state: DeclarationParserState = { tokens, index: 0 };
+  const argumentOperatorSetName = parseEvaluateAnnotation(state);
 
   const qualifiers: QualifierDecl[] = [];
   while (true) {
@@ -287,23 +342,21 @@ export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
   const body = extractNestedBlock(rawSource, bodyStartOffset);
 
   const closeTokenIndex = findBlockCloseTokenIndex(tokens, state.index);
-  for (let i = closeTokenIndex + 1; i < tokens.length; i += 1) {
-    if (!isIgnorable(tokens[i]!)) {
-      throw new Error("Unexpected content after command body");
-    }
-  }
+  const bodyStatementSetName = parseBodyStatementAnnotation(tokens.slice(closeTokenIndex + 1));
 
   const globalKeywords = new Set<string>();
   collectGlobalKeywords(argDecls, globalKeywords);
 
   return {
     name: commandNameToken.value,
+    argumentOperatorSetName,
     qualifiers,
     argDecls,
     body: {
       kind: "nested-block",
       content: body.content
     },
+    bodyStatementSetName,
     globalKeywords
   };
 }

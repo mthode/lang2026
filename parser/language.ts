@@ -64,6 +64,42 @@ export function toParserConfig(language: Language): ParserConfig {
   };
 }
 
+export function resolveNamedOperatorSet(
+  registry: ReadonlyMap<string, OperatorSetDefinition>,
+  name: string
+): OperatorSetDefinition {
+  const definition = registry.get(name);
+  if (!definition) {
+    throw new Error(`Unknown operator set '${name}'`);
+  }
+
+  return cloneOperatorSet(definition);
+}
+
+export function resolveNamedCommandSet(
+  registry: ReadonlyMap<string, CommandSetDefinition>,
+  name: string
+): CommandSetDefinition {
+  const definition = registry.get(name);
+  if (!definition) {
+    throw new Error(`Unknown command set '${name}'`);
+  }
+
+  return cloneCommandSet(definition);
+}
+
+export function resolveNamedStatementSet(
+  registry: ReadonlyMap<string, Language>,
+  name: string
+): Language {
+  const definition = registry.get(name);
+  if (!definition) {
+    throw new Error(`Unknown statement set '${name}'`);
+  }
+
+  return cloneLanguage(definition);
+}
+
 export function cloneLanguage(definition: Language): Language {
   return {
     operatorSet: cloneOperatorSet(definition.operatorSet),

@@ -17,12 +17,18 @@ Use these entry points depending on the layer you are working in:
 - `parseInvocation(tokens, decl)` parses one invocation against a specific declaration.
 - `validateInvocation(result, decl)` enforces required-clause and clause-cardinality rules after parsing.
 
+Named-language resolution helpers are also exported for the shell runtime:
+
+- `resolveNamedOperatorSet(registry, name)`
+- `resolveNamedCommandSet(registry, name)`
+- `resolveNamedStatementSet(registry, name)`
+
 ## Command Declarations
 
 User-defined commands are declared with `cmd`:
 
 ```text
-cmd [qualifier? ...] commandName argDecls { body }
+cmd [--evaluate operatorSet]? [qualifier? ...] commandName argDecls { body } [:: statementSet]
 ```
 
 The body is stored as a nested block and executed later by the shell runtime.
@@ -41,8 +47,10 @@ The body is stored as a nested block and executed later by the shell runtime.
 The declaration grammar is:
 
 ```ebnf
-CommandDefn      ::= "cmd" QualifierDecl* CommandName ArgDecls Body
+CommandDefn      ::= "cmd" ArgExprSpec? QualifierDecl* CommandName ArgDecls Body BodyStmtSpec?
+ArgExprSpec      ::= "--" "evaluate" OperatorSetName
 Body             ::= "{" CommandText "}"
+BodyStmtSpec     ::= "::" StatementSetName
 
 ArgDecls         ::= ArgDecl* OptionalArgDecl* KeyedDecl* ("..." NamedArgDecl*)?
 
@@ -59,6 +67,11 @@ KeyedDecl        ::= "(" Keyword ArgDecls ")" "+"?
 
 QualifierDecl    ::= Keyword "?"
 ```
+
+Additional declaration metadata captured by the parser:
+
+- `argumentOperatorSetName` stores the optional operator set named by `--evaluate`.
+- `bodyStatementSetName` stores the optional statement set named by postfix `:: Name`.
 
 ### Declaration Forms
 
@@ -139,6 +152,8 @@ The scanner emits `...` as a single operator token, but string literals containi
 ## Invocation Semantics
 
 Given a declaration, invocation parsing is deterministic and left-to-right.
+
+If the declaration carries `argumentOperatorSetName`, invocation parsing can also reduce one value-bearing slot from multiple tokens into a parsed expression node using the selected operator set. Clause keywords still terminate that parse when they are valid clause transitions, and trailing required values still reserve enough input to bind correctly.
 
 ### Segments
 
@@ -222,9 +237,11 @@ interface ArgDeclGroup {
 
 interface CommandDeclaration {
 	name: string;
+	argumentOperatorSetName?: string;
 	qualifiers: QualifierDecl[];
 	argDecls: ArgDeclGroup;
 	body: NestedBlockNode;
+	bodyStatementSetName?: string;
 	globalKeywords: Set<string>;
 }
 ```
@@ -257,6 +274,7 @@ cmd cp _ ... destination { echo copy $args to $destination }
 cmd verbose? cp _ [mode name]* ... destination { echo copy }
 cmd send _ (to _) { echo send $1 to $to }
 cmd move (from _ (within _)) (to _) { echo move }
+cmd --evaluate math_ops calc value { eval $value } :: eval_stmt
 ```
 
 ## Runtime Flow

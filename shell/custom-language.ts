@@ -21,6 +21,9 @@ export const shellCommandDefinitions: Record<string, CommandDefinition> = {
   cmd: {
     arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
   },
+  cmdset: {
+    arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
+  },
   func: {
     arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
   },
@@ -52,8 +55,14 @@ export const shellCommandDefinitions: Record<string, CommandDefinition> = {
   echo: {
     arguments: [{ name: "extras", kind: "expression", positional: true, vararg: true }]
   },
+  opset: {
+    arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
+  },
   raw: {
     arguments: [{ name: "text", kind: "raw", positional: true, vararg: true }]
+  },
+  stmtset: {
+    arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
   }
 };
 

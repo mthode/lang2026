@@ -26,6 +26,8 @@ export interface ShellEnvironmentOptions {
 
 export interface UserCommandDefinition {
   declaration: CommandDeclaration;
+  argumentOperatorSet?: OperatorSetDefinition;
+  bodyLanguage?: Language;
 }
 
 export function createShellEnvironment(options: ShellEnvironmentOptions = {}): ShellEnvironment {

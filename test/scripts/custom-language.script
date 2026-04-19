@@ -1,0 +1,15 @@
+opset math_ops {
+  infix + precedence 7 left
+}
+
+cmdset eval_only {
+  eval
+}
+
+stmtset eval_stmt commands eval_only operators shell_ops
+
+cmd --evaluate math_ops calc value {
+  eval $value
+} :: eval_stmt
+
+calc 1 + 2

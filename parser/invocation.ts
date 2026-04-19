@@ -1,11 +1,16 @@
 import type { Token } from "../scanner/index.js";
-import { isIgnorable } from "./expression.js";
+import type { ArgumentValue } from "./command.js";
+import {
+  isIgnorable,
+  parseExpressionFromTokens,
+  type ExpressionParserConfig
+} from "./expression.js";
 import type { ArgDeclGroup, CommandDeclaration, ParsedArguments, ParsedCommand } from "./declaration.js";
 
 interface ClauseParseState {
   parsed: ParsedArguments;
   positionalIndex: number;
-  postVarargValues: string[];
+  postVarargValues: ArgumentValue[];
 }
 
 interface InvocationSegment {
@@ -74,7 +79,7 @@ function createClauseState(clauseName: string): ClauseParseState {
   };
 }
 
-function assignPositionalValue(group: ArgDeclGroup, state: ClauseParseState, value: string): boolean {
+function assignPositionalValue(group: ArgDeclGroup, state: ClauseParseState, value: ArgumentValue): boolean {
   if (state.positionalIndex < group.positional.length) {
     const declaration = group.positional[state.positionalIndex]!;
     if (declaration.kind === "named" && declaration.name) {
@@ -92,6 +97,102 @@ function assignPositionalValue(group: ArgDeclGroup, state: ClauseParseState, val
   }
 
   return false;
+}
+
+function flattenSegmentTokens(segments: InvocationSegment[], startIndex: number, endIndex: number): Token[] {
+  return segments.slice(startIndex, endIndex).flatMap((segment) => segment.tokens);
+}
+
+function findChildClauseBoundaryIndex(
+  group: ArgDeclGroup,
+  segments: InvocationSegment[],
+  fromIndex: number,
+  globalKeywords: Set<string>
+): number {
+  for (let index = fromIndex; index < segments.length; index += 1) {
+    const segment = segments[index]!;
+    if (!isKeywordCandidate(segment, globalKeywords)) {
+      continue;
+    }
+
+    const keyword = segmentIdentifierValue(segment)!;
+    if (findChildClause(group, keyword)) {
+      return index;
+    }
+  }
+
+  return segments.length;
+}
+
+function hasAdditionalValueSlots(group: ArgDeclGroup, state: ClauseParseState): boolean {
+  if (state.positionalIndex < group.positional.length - 1) {
+    return true;
+  }
+
+  return group.vararg !== undefined;
+}
+
+function countRequiredValuesAfterCurrent(group: ArgDeclGroup, state: ClauseParseState): number {
+  let count = 0;
+
+  if (state.positionalIndex < group.positional.length) {
+    for (let index = state.positionalIndex + 1; index < group.positional.length; index += 1) {
+      if (!group.positional[index]!.optional) {
+        count += 1;
+      }
+    }
+  }
+
+  if (group.vararg) {
+    count += group.vararg.trailingNamedArgs.length;
+  }
+
+  return count;
+}
+
+function tryParseExpressionValue(
+  tokens: Token[],
+  expressionConfig: ExpressionParserConfig
+): ArgumentValue | undefined {
+  try {
+    return parseExpressionFromTokens(tokens, expressionConfig);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseExpressionValueForClause(
+  group: ArgDeclGroup,
+  state: ClauseParseState,
+  segments: InvocationSegment[],
+  startIndex: number,
+  globalKeywords: Set<string>,
+  expressionConfig: ExpressionParserConfig
+): { value: ArgumentValue; nextIndex: number } {
+  const valueRegionEnd = findChildClauseBoundaryIndex(group, segments, startIndex, globalKeywords);
+  const requiredAfterCurrent = countRequiredValuesAfterCurrent(group, state);
+  const canLeaveAdditionalValues = hasAdditionalValueSlots(group, state);
+  const minEnd = startIndex + 1;
+  const maxEnd = canLeaveAdditionalValues
+    ? Math.max(minEnd, valueRegionEnd - requiredAfterCurrent)
+    : valueRegionEnd;
+
+  for (let endIndex = maxEnd; endIndex >= minEnd; endIndex -= 1) {
+    if (valueRegionEnd - endIndex < requiredAfterCurrent) {
+      continue;
+    }
+
+    const parsed = tryParseExpressionValue(flattenSegmentTokens(segments, startIndex, endIndex), expressionConfig);
+    if (parsed !== undefined) {
+      return { value: parsed, nextIndex: endIndex };
+    }
+  }
+
+  const fullRangeTokens = flattenSegmentTokens(segments, startIndex, valueRegionEnd);
+  return {
+    value: parseExpressionFromTokens(fullRangeTokens, expressionConfig),
+    nextIndex: valueRegionEnd
+  };
 }
 
 function finalizeClause(group: ArgDeclGroup, state: ClauseParseState): void {
@@ -130,7 +231,8 @@ function parseClause(
   clauseName: string,
   segments: InvocationSegment[],
   startIndex: number,
-  globalKeywords: Set<string>
+  globalKeywords: Set<string>,
+  expressionConfig?: ExpressionParserConfig
 ): { parsed: ParsedArguments; nextIndex: number } {
   const state = createClauseState(clauseName);
   let index = startIndex;
@@ -145,7 +247,7 @@ function parseClause(
         break;
       }
 
-      const child = parseClause(childDecl.argDecls, childDecl.keyword, segments, index + 1, globalKeywords);
+      const child = parseClause(childDecl.argDecls, childDecl.keyword, segments, index + 1, globalKeywords, expressionConfig);
       if (!state.parsed.clauses[childDecl.keyword]) {
         state.parsed.clauses[childDecl.keyword] = [];
       }
@@ -154,18 +256,26 @@ function parseClause(
       continue;
     }
 
-    const consumed = assignPositionalValue(group, state, segment.value);
+    const valueResult = expressionConfig
+      ? parseExpressionValueForClause(group, state, segments, index, globalKeywords, expressionConfig)
+      : { value: segment.value, nextIndex: index + 1 };
+
+    const consumed = assignPositionalValue(group, state, valueResult.value);
     if (!consumed) {
       break;
     }
-    index += 1;
+    index = valueResult.nextIndex;
   }
 
   finalizeClause(group, state);
   return { parsed: state.parsed, nextIndex: index };
 }
 
-export function parseInvocation(tokens: Token[], decl: CommandDeclaration): ParsedCommand {
+export function parseInvocation(
+  tokens: Token[],
+  decl: CommandDeclaration,
+  expressionConfig?: ExpressionParserConfig
+): ParsedCommand {
   const segments = splitInvocationSegments(tokens);
   const qualifiers = Object.fromEntries(decl.qualifiers.map((q) => [q.keyword, false])) as Record<string, boolean>;
   const qualifierSet = new Set(decl.qualifiers.map((q) => q.keyword));
@@ -190,7 +300,7 @@ export function parseInvocation(tokens: Token[], decl: CommandDeclaration): Pars
   }
   index += 1;
 
-  const root = parseClause(decl.argDecls, decl.name, segments, index, decl.globalKeywords);
+  const root = parseClause(decl.argDecls, decl.name, segments, index, decl.globalKeywords, expressionConfig);
 
   if (root.nextIndex < segments.length) {
     const segment = segments[root.nextIndex]!;

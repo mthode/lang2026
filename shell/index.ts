@@ -6,6 +6,7 @@ import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
 import { executeCdCommand } from "./commands/cd.js";
 import { executeFuncCommand } from "./commands/function.js";
+import { executeCmdsetCommand, executeOpsetCommand, executeStmtsetCommand } from "./commands/language-object.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
@@ -24,10 +25,13 @@ const shellParser = createParser(shellParserConfig);
 const commandExecutors: Record<string, ShellCommandExecutor> = {
   cd: executeCdCommand,
   cmd: executeCmdCommand,
+  cmdset: executeCmdsetCommand,
   func: executeFuncCommand,
   eval: executeEvalCommand,
   echo: executeEchoCommand,
   if: executeIfCommand,
+  opset: executeOpsetCommand,
+  stmtset: executeStmtsetCommand,
   while: executeWhileCommand,
   for: executeForCommand
 };

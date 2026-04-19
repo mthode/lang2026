@@ -1,5 +1,13 @@
-import { parseCommandDeclaration, parseInvocation, validateDeclaration, validateInvocation } from "../../parser/index.js";
-import { renderTemplateVariables } from "../../lang/expression.js";
+import {
+  parseCommandDeclaration,
+  parseInvocation,
+  resolveNamedOperatorSet,
+  resolveNamedStatementSet,
+  toExpressionParserConfig,
+  validateDeclaration,
+  validateInvocation
+} from "../../parser/index.js";
+import { renderTemplateVariables, stringifyExpression } from "../../lang/expression.js";
 import { scan } from "../../scanner/index.js";
 import { executeBodyStatements } from "../utils/body.js";
 import type {
@@ -20,8 +28,19 @@ export const executeCmdCommand: ShellCommandExecutor = (command, _context, envir
     throw new Error(`Cannot define command '${declaration.name}': a function with that name already exists`);
   }
 
+  const argumentOperatorSet = declaration.argumentOperatorSetName
+    ? resolveNamedOperatorSet(environment.operatorSets, declaration.argumentOperatorSetName)
+    : undefined;
+  const bodyLanguage = declaration.bodyStatementSetName
+    ? resolveNamedStatementSet(environment.statementSets, declaration.bodyStatementSetName)
+    : undefined;
+
   validateDeclaration(declaration, new Set(environment.commands.keys()));
-  environment.commands.set(declaration.name, { declaration });
+  environment.commands.set(declaration.name, {
+    declaration,
+    argumentOperatorSet,
+    bodyLanguage
+  });
   return undefined;
 };
 
@@ -36,13 +55,17 @@ export function executeUserCommand(
     return undefined;
   }
 
-  const invocation = parseInvocation(scan(statementRaw), definition.declaration);
+  const invocation = parseInvocation(
+    scan(statementRaw),
+    definition.declaration,
+    definition.argumentOperatorSet ? toExpressionParserConfig(definition.argumentOperatorSet) : undefined
+  );
   validateInvocation(invocation, definition.declaration);
 
   const renderedArgs = toTemplateVariables(invocation, definition);
   const resolvedBody = renderTemplateVariables(definition.declaration.body.content, renderedArgs);
 
-  const outputs = executeBodyStatements(resolvedBody, context, environment);
+  const outputs = executeBodyStatements(resolvedBody, context, environment, definition.bodyLanguage);
 
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 }
@@ -63,6 +86,10 @@ function toTemplateVariables(
     if (value && typeof value === "object" && "kind" in value && (value as { kind?: string }).kind === "nested-block") {
       const blockValue = value as { content?: unknown };
       return typeof blockValue.content === "string" ? blockValue.content : undefined;
+    }
+
+    if (value && typeof value === "object" && "kind" in value) {
+      return stringifyExpression(value as Parameters<typeof stringifyExpression>[0]);
     }
 
     return undefined;

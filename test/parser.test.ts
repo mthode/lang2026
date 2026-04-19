@@ -159,7 +159,7 @@ describe("parser", () => {
       allowAssignmentStatements: true
     });
     expressionConfig.prefixOperators["+"] = { precedence: 5 };
-    commandConfig.commands.calc!.arguments![0]!.name = "changed";
+    commandConfig.commands!.calc!.arguments![0]!.name = "changed";
     parserConfig.commands!.calc!.arguments![0]!.name = "mutated";
 
     expect(operatorSet.prefixOperators["+"]).toBeUndefined();
@@ -331,9 +331,21 @@ describe("parseCommandDeclaration", () => {
 
     expect(decl.name).toBe("noop");
     expect(decl.qualifiers).toEqual([]);
+    expect(decl.argumentOperatorSetName).toBeUndefined();
+    expect(decl.bodyStatementSetName).toBeUndefined();
     expect(decl.argDecls).toEqual({ positional: [], keyedClauses: [], vararg: undefined });
     expect(decl.body.content).toBe("echo hi");
     expect([...decl.globalKeywords]).toEqual([]);
+  });
+
+  it("parses evaluate and body language annotations", () => {
+    const decl = parseCommandDeclaration(declarationTokens("cmd --evaluate math_ops verbose? render name { echo hi } :: template_stmt"));
+
+    expect(decl.name).toBe("render");
+    expect(decl.argumentOperatorSetName).toBe("math_ops");
+    expect(decl.bodyStatementSetName).toBe("template_stmt");
+    expect(decl.qualifiers).toEqual([{ keyword: "verbose" }]);
+    expect(decl.argDecls.positional).toEqual([{ kind: "named", name: "name", optional: false }]);
   });
 
   it("parses positional args, optional args, keyed clauses, and vararg trailing names", () => {
@@ -385,6 +397,22 @@ describe("parseCommandDeclaration", () => {
     ).toThrowError("Unexpected content after command body");
   });
 
+  it("throws for repeated evaluate annotations", () => {
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd --evaluate shell_ops --evaluate math_ops broken { echo hi }"))
+    ).toThrowError("Repeated '--evaluate' annotation");
+  });
+
+  it("throws for missing or repeated body annotations", () => {
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken { echo hi } ::"))
+    ).toThrowError("Expected statement set name after '::'");
+
+    expect(() =>
+      parseCommandDeclaration(declarationTokens("cmd broken { echo hi } :: one :: two"))
+    ).toThrowError("Repeated body annotation ':: Name'");
+  });
+
   it("validateDeclaration rejects qualifier colliding with existing command name", () => {
     const decl = parseCommandDeclaration(declarationTokens("cmd verbose? cp { }"));
     expect(() => validateDeclaration(decl, new Set(["verbose"]))).toThrowError("Qualifier keyword 'verbose' collides with existing command name");
@@ -402,6 +430,16 @@ describe("parseCommandDeclaration", () => {
 });
 
 describe("parseInvocation", () => {
+  const mathExpressionConfig = toExpressionParserConfig({
+    prefixOperators: {
+      "-": { precedence: 9 }
+    },
+    infixOperators: {
+      "+": { precedence: 7 },
+      "*": { precedence: 8 }
+    }
+  });
+
   function declaration(source: string) {
     const tokens = scan(source);
     const cmdIndex = tokens.findIndex((token) => token.type === "identifier" && token.value === "cmd");
@@ -421,6 +459,58 @@ describe("parseInvocation", () => {
 
     expect(parsed.commandName).toBe("echo");
     expect(parsed.arguments.varArgs).toEqual(["hello", "world"]);
+  });
+
+  it("parses expression-valued arguments with a selected operator set", () => {
+    const decl = declaration("cmd --evaluate math_ops my_math value { }");
+    const parsed = parseInvocation(invocation("my_math 2 + 2"), decl, mathExpressionConfig);
+
+    const value = parsed.arguments.namedArgs.value;
+    expect(value && typeof value === "object" && !Array.isArray(value) && "kind" in value ? value.kind : "").toBe("binary");
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("kind" in value) || value.kind !== "binary") {
+      throw new Error("expected binary expression value");
+    }
+
+    expect(value.operator).toBe("+");
+  });
+
+  it("splits multiple expression arguments while preserving longest complete expressions", () => {
+    const decl = declaration("cmd --evaluate math_ops pair left right { }");
+    const parsed = parseInvocation(invocation("pair 1 + 2 3 + 4"), decl, mathExpressionConfig);
+
+    const left = parsed.arguments.namedArgs.left;
+    const right = parsed.arguments.namedArgs.right;
+    expect(left && typeof left === "object" && !Array.isArray(left) && "kind" in left ? left.kind : "").toBe("binary");
+    expect(right && typeof right === "object" && !Array.isArray(right) && "kind" in right ? right.kind : "").toBe("binary");
+  });
+
+  it("keeps keyed clause keywords as expression boundaries", () => {
+    const decl = declaration("cmd --evaluate math_ops send value (to target) { }");
+    const parsed = parseInvocation(invocation("send 1 + 2 to admin"), decl, mathExpressionConfig);
+
+    const value = parsed.arguments.namedArgs.value;
+    expect(value && typeof value === "object" && !Array.isArray(value) && "kind" in value ? value.kind : "").toBe("binary");
+
+    const target = parsed.arguments.clauses.to?.[0]?.namedArgs.target;
+    expect(target && typeof target === "object" && !Array.isArray(target) && "kind" in target ? target.kind : "").toBe("identifier");
+  });
+
+  it("leaves enough input for trailing required arguments when parsing expressions", () => {
+    const decl = declaration("cmd --evaluate math_ops cp left ... destination { }");
+    const parsed = parseInvocation(invocation("cp 1 + 2 3 + 4 dst"), decl, mathExpressionConfig);
+
+    const left = parsed.arguments.namedArgs.left;
+    expect(left && typeof left === "object" && !Array.isArray(left) && "kind" in left ? left.kind : "").toBe("binary");
+    expect(parsed.arguments.varArgs).toHaveLength(1);
+    const vararg = parsed.arguments.varArgs[0];
+    expect(vararg && typeof vararg === "object" && !Array.isArray(vararg) && "kind" in vararg ? vararg.kind : "").toBe("binary");
+    const destination = parsed.arguments.namedArgs.destination;
+    expect(destination && typeof destination === "object" && !Array.isArray(destination) && "kind" in destination ? destination.kind : "").toBe("identifier");
+  });
+
+  it("throws for incomplete selected-operator expressions", () => {
+    const decl = declaration("cmd --evaluate math_ops my_math value { }");
+    expect(() => parseInvocation(invocation("my_math 1 +"), decl, mathExpressionConfig)).toThrowError("Unexpected token '+'");
   });
 
   it("parses named positional invocation", () => {

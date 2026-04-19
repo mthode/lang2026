@@ -41,4 +41,13 @@ describe("scripting", () => {
 
     expect(normalizeOutput(output)).toBe("42\n0\n1\n1\n2\n3\n5");
   });
+
+  it("runs custom language declarations end-to-end from a .script file", async () => {
+    let output = "";
+    await runScriptFile("test/scripts/custom-language.script", (text) => {
+      output += text;
+    });
+
+    expect(normalizeOutput(output)).toBe("3");
+  });
 });
