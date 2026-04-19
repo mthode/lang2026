@@ -1,12 +1,12 @@
 import { splitLogicalLinesWithMetadata } from "../../scanner/index.js";
-import type { ParserDefinition } from "../../parser/index.js";
+import type { Language } from "../../parser/index.js";
 import type { ShellCommandContext, ShellEnvironment } from "../commands/types.js";
 
 export function executeBodyStatements(
   bodyContent: string,
   context: ShellCommandContext,
   environment: ShellEnvironment,
-  scope?: ParserDefinition
+  scope?: Language
 ): string[] {
   const outputs: string[] = [];
   const lines = splitLogicalLinesWithMetadata(bodyContent);

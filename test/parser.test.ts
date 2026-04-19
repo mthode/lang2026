@@ -5,6 +5,8 @@ import { parseCommandDeclaration } from "../parser/declaration.js";
 import { scan } from "../scanner/index.js";
 import { validateDeclaration } from "../parser/declaration.js";
 import { parseInvocation, validateInvocation } from "../parser/invocation.js";
+import { createLanguage, toCommandParserDefinition, toExpressionParserConfig, toParserConfig } from "../parser/language.js";
+import type { CommandSetDefinition, Language, OperatorSetDefinition } from "../parser/index.js";
 
 describe("parser", () => {
   const parser = createParser({
@@ -101,6 +103,68 @@ describe("parser", () => {
     const extras = statement.args.extras;
     expect(Array.isArray(extras)).toBe(true);
     expect((extras as unknown[]).length).toBe(3);
+  });
+
+  it("converts named language objects into parser configs without aliasing source definitions", () => {
+    const operatorSet: OperatorSetDefinition = {
+      name: "math_ops",
+      prefixOperators: {
+        "-": { precedence: 9 }
+      },
+      infixOperators: {
+        "+": { precedence: 7 }
+      }
+    };
+
+    const commandSet: CommandSetDefinition = {
+      name: "math_cmds",
+      commands: {
+        calc: {
+          arguments: [{ name: "expr", kind: "expression", positional: true }]
+        }
+      },
+      strictCommands: true,
+      defaultCommand: {
+        argumentKind: "raw",
+        parseNamedArguments: false
+      }
+    };
+
+    const language: Language = createLanguage({
+      commandSet,
+      operatorSet
+    }, {
+      allowAssignmentStatements: true
+    });
+
+    const expressionConfig = toExpressionParserConfig(operatorSet);
+    const commandConfig = toCommandParserDefinition(commandSet);
+    const parserConfig = toParserConfig(language);
+
+    expect(expressionConfig).toEqual({
+      prefixOperators: operatorSet.prefixOperators,
+      infixOperators: operatorSet.infixOperators
+    });
+    expect(commandConfig).toMatchObject({
+      commands: commandSet.commands,
+      strictCommands: true,
+      defaultCommand: commandSet.defaultCommand
+    });
+    expect(parserConfig).toMatchObject({
+      prefixOperators: operatorSet.prefixOperators,
+      infixOperators: operatorSet.infixOperators,
+      commands: commandSet.commands,
+      strictCommands: true,
+      defaultCommand: commandSet.defaultCommand,
+      allowAssignmentStatements: true
+    });
+    expressionConfig.prefixOperators["+"] = { precedence: 5 };
+    commandConfig.commands.calc!.arguments![0]!.name = "changed";
+    parserConfig.commands!.calc!.arguments![0]!.name = "mutated";
+
+    expect(operatorSet.prefixOperators["+"]).toBeUndefined();
+    expect(commandSet.commands.calc?.arguments?.[0]?.name).toBe("expr");
+    expect(language.commandSet.commands.calc?.arguments?.[0]?.name).toBe("expr");
   });
 
   it("includes line and column for token-specific parse errors", () => {
@@ -210,12 +274,20 @@ describe("parser", () => {
               name: "body",
               kind: "nested-block",
               positional: true,
-              nestedScope: {
-                commands: {
-                  only: { arguments: [] }
+              nestedScope: createLanguage({
+                commandSet: {
+                  name: "only_cmds",
+                  commands: {
+                    only: { arguments: [] }
+                  },
+                  strictCommands: true
                 },
-                strictCommands: true
-              }
+                operatorSet: {
+                  name: "only_ops",
+                  prefixOperators: {},
+                  infixOperators: {}
+                }
+              })
             }
           ]
         },

@@ -1,4 +1,4 @@
-import { createParser, type CommandNode, type ParserConfig, type ParserDefinition, type StatementNode } from "../parser/index.js";
+import { createParser, type CommandNode, type ParserConfig, type Language, type StatementNode } from "../parser/index.js";
 import { splitLogicalLinesWithMetadata } from "../scanner/index.js";
 import type { ReplCallbacks } from "../repl/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
@@ -11,62 +11,13 @@ import { executeIfCommand } from "./commands/if.js";
 import { executeWhileCommand } from "./commands/while.js";
 import { translateBuiltInInvocation } from "./commands/builtin-invocation.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
-import { expressionConfig } from "../lang/expression-config.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
 import { evaluateLangExpression, substituteStatementVariables } from "../lang/expression.js";
-import { getCommandArgumentSource } from "../parser/index.js";
+import { getCommandArgumentSource, toParserConfig } from "../parser/index.js";
+import { shellStatementSet } from "./custom-language.js";
 export { evaluateLangExpression as evaluateShellExpression } from "../lang/expression.js";
 
-const shellParserConfig: ParserConfig = {
-  ...expressionConfig,
-  allowAssignmentStatements: true,
-  defaultCommand: {
-    argumentKind: "raw",
-    parseNamedArguments: false
-  },
-  commands: {
-    cd: {
-      arguments: [{ name: "path", kind: "raw", positional: true, vararg: true }]
-    },
-    cmd: {
-      arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
-    },
-    func: {
-      arguments: [{ name: "declaration", kind: "raw", positional: true, vararg: true }]
-    },
-    if: {
-      arguments: [
-        { name: "condition", kind: "expression", positional: true },
-        { name: "then", kind: "nested-block" },
-        { name: "else", kind: "nested-block", optional: true }
-      ]
-    },
-    while: {
-      arguments: [
-        { name: "condition", kind: "expression", positional: true },
-        { name: "do", kind: "nested-block" }
-      ]
-    },
-    for: {
-      arguments: [
-        { name: "iterator", kind: "expression", positional: true },
-        { name: "from", kind: "expression" },
-        { name: "to", kind: "expression" },
-        { name: "step", kind: "expression", optional: true },
-        { name: "do", kind: "nested-block" }
-      ]
-    },
-    eval: {
-      arguments: [{ name: "expression", kind: "expression", positional: true }]
-    },
-    echo: {
-      arguments: [{ name: "extras", kind: "expression", positional: true, vararg: true }]
-    },
-    raw: {
-      arguments: [{ name: "text", kind: "raw", positional: true, vararg: true }]
-    }
-  }
-};
+const shellParserConfig: ParserConfig = toParserConfig(shellStatementSet);
 
 const shellParser = createParser(shellParserConfig);
 
@@ -90,9 +41,9 @@ const commandContext: ShellCommandContext = {
 
 export type ShellCommandNode = CommandNode;
 export type ShellStatementNode = StatementNode;
-export const parseShellLine = (source: string, startLine?: number, scope?: ParserDefinition) =>
+export const parseShellLine = (source: string, startLine?: number, scope?: Language) =>
   shellParser.parseLine(source, startLine, scope);
-export const parseShellScript = (source: string, scope?: ParserDefinition) => shellParser.parseScript(source, scope);
+export const parseShellScript = (source: string, scope?: Language) => shellParser.parseScript(source, scope);
 export const formatShellPrompt = (environment: ShellEnvironment): string => `${environment.currentDirectory}> `;
 
 export interface ShellSourceExecutionResult {
@@ -106,7 +57,7 @@ export function createShellReplCallbacks(environment: ShellEnvironment): ReplCal
   };
 }
 
-export function executeShellSource(source: string, environment: ShellEnvironment, scope?: ParserDefinition): ShellSourceExecutionResult {
+export function executeShellSource(source: string, environment: ShellEnvironment, scope?: Language): ShellSourceExecutionResult {
   const statements = splitLogicalLinesWithMetadata(source);
   const outputs: string[] = [];
   let lastCommand: ShellCommandNode | undefined;

@@ -1,7 +1,55 @@
 import { describe, expect, it } from "vitest";
 import { createShellEnvironment, executeShellCommand, executeShellSource, parseShellLine } from "../shell/index.js";
+import {
+  SHELL_COMMAND_SET_NAME,
+  SHELL_OPERATOR_SET_NAME,
+  SHELL_STATEMENT_SET_NAME,
+  registerCommandSet,
+  registerOperatorSet,
+  registerStatementSet,
+  shellStatementSet
+} from "../shell/custom-language.js";
 
 describe("shell eval command", () => {
+  it("seeds default language registries in the shell environment", () => {
+    const environment = createShellEnvironment();
+
+    const operatorSet = environment.operatorSets.get(SHELL_OPERATOR_SET_NAME);
+    const commandSet = environment.commandSets.get(SHELL_COMMAND_SET_NAME);
+    const statementSet = environment.statementSets.get(SHELL_STATEMENT_SET_NAME);
+
+    expect(operatorSet).toBeDefined();
+    expect(commandSet).toBeDefined();
+    expect(statementSet).toBeDefined();
+    expect(commandSet?.commands.echo).toBeDefined();
+    expect(statementSet).toMatchObject({
+      allowAssignmentStatements: true
+    });
+    expect(statementSet?.commandSet.commands.echo).toBeDefined();
+    expect(statementSet?.operatorSet.infixOperators["+"]).toBeDefined();
+  });
+
+  it("rejects duplicate language object registration", () => {
+    const environment = createShellEnvironment();
+
+    expect(() =>
+      registerOperatorSet(environment.operatorSets, SHELL_OPERATOR_SET_NAME, {
+        prefixOperators: {},
+        infixOperators: {}
+      })
+    ).toThrowError(`Cannot redefine operator set '${SHELL_OPERATOR_SET_NAME}'`);
+
+    expect(() =>
+      registerCommandSet(environment.commandSets, SHELL_COMMAND_SET_NAME, {
+        commands: {}
+      })
+    ).toThrowError(`Cannot redefine command set '${SHELL_COMMAND_SET_NAME}'`);
+
+    expect(() =>
+      registerStatementSet(environment.statementSets, SHELL_STATEMENT_SET_NAME, shellStatementSet)
+    ).toThrowError(`Cannot redefine statement set '${SHELL_STATEMENT_SET_NAME}'`);
+  });
+
   it("parses eval expression with spaces as a single argument", () => {
     const statement = parseShellLine("eval 1 + 2 * 3");
     expect(statement.kind).toBe("command");
