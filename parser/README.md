@@ -1,34 +1,23 @@
-# Parser Usage Guide
+# Parser Reference
 
-This directory contains the parser used by the shell language. The parser has two main jobs:
+This directory contains the parser used by the shell language. It has two related jobs:
 
-1. Parse shell statements (commands and assignments)
-2. Parse command declarations and invocations for user-defined commands
+1. Parse ordinary shell statements such as commands and assignments.
+2. Parse user-defined command declarations and parse invocations against those declarations.
 
-The scanner tokenizes input first, and the parser builds structured nodes from those tokens.
+The scanner tokenizes input first. The parser then builds structured nodes for statements, command declarations, and parsed invocations.
 
-## What To Use
+## Public API
 
-Use these APIs depending on what you are doing:
+Use these entry points depending on the layer you are working in:
 
-- `createParser(config)`
-	- Parses normal shell lines and scripts.
-	- Used by shell runtime for built-in commands, assignments, and general command parsing.
+- `createParser(config)` parses normal shell lines and scripts.
+- `parseCommandDeclaration(tokens)` parses a `cmd` declaration into a `CommandDeclaration`.
+- `validateDeclaration(decl, existingCommandNames)` enforces declaration-level rules.
+- `parseInvocation(tokens, decl)` parses one invocation against a specific declaration.
+- `validateInvocation(result, decl)` enforces required-clause and clause-cardinality rules after parsing.
 
-- `parseCommandDeclaration(tokens)`
-	- Parses a `cmd` declaration into a `CommandDeclaration`.
-	- Use when registering user-defined commands.
-
-- `validateDeclaration(decl, existingCommandNames)`
-	- Validates declaration-level rules (keyword collisions, invalid vararg nesting patterns, etc).
-
-- `parseInvocation(tokens, decl)`
-	- Parses one command invocation against a specific declaration.
-
-- `validateInvocation(result, decl)`
-	- Validates invocation cardinality rules (required clauses present, single-occurrence constraints, etc).
-
-## Command Declaration Syntax
+## Command Declarations
 
 User-defined commands are declared with `cmd`:
 
@@ -36,7 +25,42 @@ User-defined commands are declared with `cmd`:
 cmd [qualifier? ...] commandName argDecls { body }
 ```
 
-### Argument declaration forms
+The body is stored as a nested block and executed later by the shell runtime.
+
+### Terminology
+
+- `_` means one unnamed positional argument.
+- `name` means one named positional argument.
+- `_?` and `name?` make that positional argument optional.
+- `...` means a vararg slot for zero or more unnamed positional arguments.
+- A keyed clause is a keyword-led nested argument group such as `(to _)` or `[mode name]*`.
+- A qualifier is a boolean flag declared before the command name, such as `verbose?`.
+
+### Grammar
+
+The declaration grammar is:
+
+```ebnf
+CommandDefn      ::= "cmd" QualifierDecl* CommandName ArgDecls Body
+Body             ::= "{" CommandText "}"
+
+ArgDecls         ::= ArgDecl* OptionalArgDecl* KeyedDecl* ("..." NamedArgDecl*)?
+
+ArgDecl          ::= "_"
+                   | NamedArgDecl
+
+NamedArgDecl     ::= ArgumentName
+
+OptionalArgDecl  ::= "_" "?"
+                   | ArgumentName "?"
+
+KeyedDecl        ::= "(" Keyword ArgDecls ")" "+"?
+                   | "[" Keyword ArgDecls "]" "*"?
+
+QualifierDecl    ::= Keyword "?"
+```
+
+### Declaration Forms
 
 - Required positional unnamed: `_`
 - Required positional named: `name`
@@ -49,76 +73,161 @@ cmd [qualifier? ...] commandName argDecls { body }
 - Vararg unnamed positional: `...`
 - Vararg with trailing required named args: `... destination`
 
-### Ordering rules
+### Ordering Rules
 
-Inside one clause, declarations are ordered as:
+Inside a single clause, declarations are ordered as:
 
-1. Required positional
-2. Optional positional
+1. Required positional arguments
+2. Optional positional arguments
 3. Keyed clauses
-4. Optional vararg (`...`) and trailing required named args
+4. Optional vararg `...` followed by trailing required named arguments
 
-### Examples
-
-```text
-cmd noop { echo ok }
-cmd greet name { echo hello $name }
-cmd cp _ ... destination { echo copy $args to $destination }
-cmd send urgent? (to _) _ { echo send $1 to $to urgent=$urgent }
-cmd add (item _)+ { echo $item }
-```
-
-## Invocation Behavior
-
-Given a declaration, invocation parsing is deterministic and left-to-right.
+This ordering is enforced by the declaration parser. For example, required positional arguments cannot appear after optional or keyed declarations, and keyed clauses cannot appear after a vararg.
 
 ### Qualifiers
 
-- Declared as `keyword?` before command name.
-- In invocation, present means `true`, absent means `false`.
-
-Example:
+Qualifiers are boolean flags declared before the command name:
 
 ```text
 cmd verbose? build target { echo verbose=$verbose target=$target }
-verbose build app
-build app
 ```
 
-### Keyed clauses
+During invocation parsing, qualifiers are read from the front of the command. If present they are `true`; if absent they are `false`.
 
-- Clause keywords are recognized only when unquoted.
-- Quoted tokens are always values.
+### Keyed Clauses
+
+Keyed clauses define nested argument groups:
+
+- `()` means the clause is required.
+- `()+` means the clause is required and repeatable.
+- `[]` means the clause is optional.
+- `[]*` means the clause is optional and repeatable.
+
+Examples:
+
+```text
+cmd send _ (to _) { echo send $1 to $to }
+cmd add (item _)+ { echo $item }
+cmd config [mode name]* { echo configured }
+```
+
+### Varargs And Trailing Named Arguments
+
+`...` captures zero or more unnamed positional values in the current clause. If trailing named arguments are declared after the vararg, the parser assigns the final values in that clause to those names.
 
 Example:
 
 ```text
-cmd send (to _) _ { echo to=$to msg=$1 }
-send to admin "to"
-```
-
-In this example, `"to"` is a value, not a second `to` clause.
-
-### Vararg greediness
-
-`...` consumes as many values as possible in the current clause, but stops when:
-
-- a recognized keyword starts a keyed clause, or
-- it must reserve values for trailing required names in the same clause.
-
-Example:
-
-```text
-cmd cp _ ... destination { echo srcs=$args dst=$destination }
+cmd cp _ ... destination { echo copy $args to $destination }
 cp a b c out
 ```
 
-Result shape is effectively:
+This produces one unnamed positional argument for the first `_`, then collects `b` and `c` into `varArgs`, and binds `destination = out`.
 
-- varArgs: `a`, `b`, `c`
-- named `destination`: `out`
+## Declaration Validation Rules
 
-## Parsed Output Shape
+The declaration parser builds the structure. `validateDeclaration` then enforces additional rules:
+
+- Keywords are case-sensitive.
+- Duplicate keyed clause keywords anywhere in one command declaration are invalid.
+- Qualifier keywords may not collide with existing command names.
+- Qualifier keywords may not collide with keyed clause keywords in the same declaration.
+- Nested keyed clauses cannot contain `...` when an ancestor clause has trailing required named arguments after its own `...`.
+
+The scanner emits `...` as a single operator token, but string literals containing `...` remain ordinary strings.
+
+## Invocation Semantics
+
+Given a declaration, invocation parsing is deterministic and left-to-right.
+
+### Segments
+
+Invocations are parsed as top-level whitespace-delimited segments. Nested structures such as `{ ... }`, `( ... )`, and `[ ... ]` remain grouped as one segment while parsing the invocation.
+
+### Keyword Recognition
+
+Only a single unquoted identifier segment can be treated as a qualifier, command name, or keyed-clause keyword. Quoted strings are always values.
+
+Example:
+
+```text
+cmd send _ (to _) { echo to=$to msg=$1 }
+send "to" to admin
+```
+
+Here `"to"` is a value, not a clause keyword.
+
+### Recursive Clause Parsing
+
+Each clause consumes segments until one of these happens:
+
+- The next segment starts one of its child keyed clauses.
+- The next segment no longer fits in the current clause, so control returns to the parent clause.
+- The token stream ends.
+
+This allows nested clause structures such as:
+
+```text
+cmd move (from _ (within _)) (to _) { echo move }
+```
+
+### Vararg Greediness
+
+Within a clause, `...` collects all remaining non-keyword values for that clause. If the clause declares trailing named arguments after the vararg, the parser reserves the final values for those names when the clause is finalized.
+
+The vararg in one clause does not consume a child clause keyword. A recognized child keyword always starts that child clause instead.
+
+### Post-Parse Validation
+
+`parseInvocation` builds structure first. `validateInvocation` then checks semantic constraints such as:
+
+- Required positional arguments are present.
+- Required keyed clauses appear at least once.
+- Single-occurrence clauses are not repeated.
+- Nested required clauses are also satisfied.
+
+This separation keeps the parsing logic simple while still enforcing declaration semantics.
+
+## Parsed Data Structures
+
+The declaration parser produces `CommandDeclaration`:
+
+```ts
+interface PositionalArgDecl {
+	kind: "named" | "unnamed";
+	name?: string;
+	optional: boolean;
+}
+
+interface VarargDecl {
+	trailingNamedArgs: string[];
+}
+
+interface KeyedClauseDecl {
+	keyword: string;
+	required: boolean;
+	allowMultiple: boolean;
+	argDecls: ArgDeclGroup;
+}
+
+interface QualifierDecl {
+	keyword: string;
+}
+
+interface ArgDeclGroup {
+	positional: PositionalArgDecl[];
+	keyedClauses: KeyedClauseDecl[];
+	vararg?: VarargDecl;
+}
+
+interface CommandDeclaration {
+	name: string;
+	qualifiers: QualifierDecl[];
+	argDecls: ArgDeclGroup;
+	body: NestedBlockNode;
+	globalKeywords: Set<string>;
+}
+```
 
 Invocation parsing returns `ParsedCommand`:
 
@@ -137,31 +246,32 @@ interface ParsedCommand {
 }
 ```
 
-`ArgumentValue` reuses parser value types (`ExpressionNode | string | NestedBlockNode`).
+`ArgumentValue` reuses parser value types: `ExpressionNode | string | NestedBlockNode`.
 
-## Built-in Commands And User Commands
+## Examples
 
-- User-defined commands use declaration + invocation parsing directly.
-- Built-in commands still execute through their existing command handlers.
-- Current migration status: declaration-based invocation translation is in place for `cd`, `echo`, `eval`, and `for`.
-- `if` and `while` remain on their current parsing path for now.
+```text
+cmd noop { echo ok }
+cmd greet name { echo hello $name }
+cmd cp _ ... destination { echo copy $args to $destination }
+cmd verbose? cp _ [mode name]* ... destination { echo copy }
+cmd send _ (to _) { echo send $1 to $to }
+cmd move (from _ (within _)) (to _) { echo move }
+```
 
-## Practical Flow For User Commands
+## Runtime Flow
 
-When implementing or invoking user-defined commands in shell runtime:
+The normal flow for user-defined commands is:
 
-1. Parse declaration source with `parseCommandDeclaration(scan(source))`
-2. Validate with `validateDeclaration(...)`
-3. Store resulting `CommandDeclaration`
-4. On invocation, parse with `parseInvocation(scan(line), declaration)`
-5. Validate with `validateInvocation(...)`
-6. Map parsed values into template variables and execute the command body
+1. Scan source.
+2. Parse the declaration with `parseCommandDeclaration(...)`.
+3. Validate it with `validateDeclaration(...)`.
+4. Store the resulting `CommandDeclaration`.
+5. Parse an invocation with `parseInvocation(...)`.
+6. Validate the invocation with `validateInvocation(...)`.
+7. Map parsed values into the execution environment and run the stored body.
 
-## Notes
-
-- Keywords are case-sensitive.
-- Duplicate keyed clause keywords in one declaration are invalid.
-- The scanner emits `...` as a single operator token.
+Built-in commands continue to use their existing command handlers, but declaration-based invocation translation is already used for some built-ins during migration.
 
 
 

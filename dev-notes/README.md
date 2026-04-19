@@ -1,0 +1,1 @@
+The plans in this folder are complete and have been implemented in the code.  They may or may not be up to date with the current state of the codebase, but can be used as a reference for how the code evolved and what features were added.  They are not intended to be read as documentation, but rather as a historical record of the development process.
