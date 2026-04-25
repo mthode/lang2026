@@ -1,4 +1,4 @@
-import type { CommandDefinition, ParserConfig } from "./command.js";
+import type { ParserConfig, StatementDefinition } from "./statement.js";
 import type {
   ExpressionParserConfig,
   InfixOperatorDefinition,
@@ -11,26 +11,26 @@ export interface OperatorSetDefinition {
   infixOperators: Record<string, InfixOperatorDefinition>;
 }
 
-export interface CommandSetDefinition {
+export interface StatementSetDefinition {
   name?: string;
-  commands: Record<string, CommandDefinition>;
-  defaultCommand?: CommandDefinition;
-  strictCommands?: boolean;
+  statements: Record<string, StatementDefinition>;
+  defaultStatement?: StatementDefinition;
+  strictStatements?: boolean;
 }
 
 export interface Language {
-  commandSet: CommandSetDefinition;
+  statementSet: StatementSetDefinition;
   operatorSet: OperatorSetDefinition;
   allowAssignmentStatements?: boolean;
 }
 
 export function createLanguage(
-  parts: Pick<Language, "commandSet" | "operatorSet">,
+  parts: Pick<Language, "statementSet" | "operatorSet">,
   overrides: Partial<Pick<Language, "allowAssignmentStatements">> = {}
 ): Language {
   return {
     operatorSet: cloneOperatorSet(parts.operatorSet),
-    commandSet: cloneCommandSet(parts.commandSet),
+    statementSet: cloneStatementSet(parts.statementSet),
     ...(overrides.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: overrides.allowAssignmentStatements }
       : {})
@@ -44,20 +44,20 @@ export function toExpressionParserConfig(operatorSet: OperatorSetDefinition): Ex
   };
 }
 
-export function toCommandParserDefinition(
-  commandSet: CommandSetDefinition
-): Pick<ParserConfig, "commands" | "strictCommands" | "defaultCommand"> {
+export function toStatementParserDefinition(
+  statementSet: StatementSetDefinition
+): Pick<ParserConfig, "statements" | "strictStatements" | "defaultStatement"> {
   return {
-    commands: cloneCommandDefinitions(commandSet.commands),
-    strictCommands: commandSet.strictCommands,
-    defaultCommand: commandSet.defaultCommand ? cloneCommandDefinition(commandSet.defaultCommand) : undefined
+    statements: cloneStatementDefinitions(statementSet.statements),
+    strictStatements: statementSet.strictStatements,
+    defaultStatement: statementSet.defaultStatement ? cloneStatementDefinition(statementSet.defaultStatement) : undefined
   };
 }
 
 export function toParserConfig(language: Language): ParserConfig {
   return {
     ...toExpressionParserConfig(language.operatorSet),
-    ...toCommandParserDefinition(language.commandSet),
+    ...toStatementParserDefinition(language.statementSet),
     ...(language.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: language.allowAssignmentStatements }
       : {})
@@ -76,25 +76,25 @@ export function resolveNamedOperatorSet(
   return cloneOperatorSet(definition);
 }
 
-export function resolveNamedCommandSet(
-  registry: ReadonlyMap<string, CommandSetDefinition>,
+export function resolveNamedStatementSet(
+  registry: ReadonlyMap<string, StatementSetDefinition>,
   name: string
-): CommandSetDefinition {
+): StatementSetDefinition {
   const definition = registry.get(name);
   if (!definition) {
-    throw new Error(`Unknown command set '${name}'`);
+    throw new Error(`Unknown statement set '${name}'`);
   }
 
-  return cloneCommandSet(definition);
+  return cloneStatementSet(definition);
 }
 
-export function resolveNamedStatementSet(
+export function resolveNamedLanguage(
   registry: ReadonlyMap<string, Language>,
   name: string
 ): Language {
   const definition = registry.get(name);
   if (!definition) {
-    throw new Error(`Unknown statement set '${name}'`);
+    throw new Error(`Unknown language '${name}'`);
   }
 
   return cloneLanguage(definition);
@@ -103,7 +103,7 @@ export function resolveNamedStatementSet(
 export function cloneLanguage(definition: Language): Language {
   return {
     operatorSet: cloneOperatorSet(definition.operatorSet),
-    commandSet: cloneCommandSet(definition.commandSet),
+    statementSet: cloneStatementSet(definition.statementSet),
     ...(definition.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: definition.allowAssignmentStatements }
       : {})
@@ -118,41 +118,42 @@ export function cloneOperatorSet(definition: OperatorSetDefinition): OperatorSet
   };
 }
 
-export function cloneCommandSet(definition: CommandSetDefinition): CommandSetDefinition {
+export function cloneStatementSet(definition: StatementSetDefinition): StatementSetDefinition {
   return {
     ...(definition.name !== undefined ? { name: definition.name } : {}),
-    commands: cloneCommandDefinitions(definition.commands),
-    strictCommands: definition.strictCommands,
-    defaultCommand: definition.defaultCommand ? cloneCommandDefinition(definition.defaultCommand) : undefined
+    statements: cloneStatementDefinitions(definition.statements),
+    strictStatements: definition.strictStatements,
+    defaultStatement: definition.defaultStatement ? cloneStatementDefinition(definition.defaultStatement) : undefined
   };
 }
 
-function cloneCommandDefinitions(
-  definitions: Record<string, CommandDefinition>
-): Record<string, CommandDefinition> {
+function cloneStatementDefinitions(
+  definitions: Record<string, StatementDefinition>
+): Record<string, StatementDefinition> {
   return Object.fromEntries(
-    Object.entries(definitions).map(([name, definition]) => [name, cloneCommandDefinition(definition)])
+    Object.entries(definitions).map(([name, definition]) => [name, cloneStatementDefinition(definition)])
   );
 }
 
-function cloneCommandDefinition(definition: CommandDefinition): CommandDefinition {
+function cloneStatementDefinition(definition: StatementDefinition): StatementDefinition {
   return {
-    arguments: definition.arguments?.map((argument) => ({
-      ...argument,
-      expressionOperators: argument.expressionOperators
+    parts: definition.parts?.map((part) => (
+      part.kind === "argument"
         ? {
-            prefixOperators: argument.expressionOperators.prefixOperators
-              ? { ...argument.expressionOperators.prefixOperators }
-              : undefined,
-            infixOperators: argument.expressionOperators.infixOperators
-              ? { ...argument.expressionOperators.infixOperators }
+            ...part,
+            expressionOperators: part.expressionOperators
+              ? {
+                  prefixOperators: part.expressionOperators.prefixOperators
+                    ? { ...part.expressionOperators.prefixOperators }
+                    : undefined,
+                  infixOperators: part.expressionOperators.infixOperators
+                    ? { ...part.expressionOperators.infixOperators }
+                    : undefined
+                }
               : undefined
           }
-        : undefined,
-      nestedScope: argument.nestedScope
-        ? cloneLanguage(argument.nestedScope)
-        : undefined
-    })),
+        : { ...part }
+    )),
     allowExtraArguments: definition.allowExtraArguments,
     argumentKind: definition.argumentKind,
     parseNamedArguments: definition.parseNamedArguments,

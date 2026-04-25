@@ -18,30 +18,30 @@ The shell can now declare named language objects and attach them to user-defined
 Minimal first-release forms:
 
 ```text
-opset math_ops {
+operators math_ops {
 	infix + precedence 7 left
 }
 
-cmdset eval_only {
+statements eval_only {
 	eval
 }
 
-stmtset eval_stmt commands eval_only operators shell_ops
+language eval_lang statements eval_only operators shell_ops
 
 cmd --evaluate math_ops calc value {
 	eval $value
-} :: eval_stmt
+} :: eval_lang
 
 calc 1 + 2
 ```
 
 Current constraints:
 
-- `opset` supports `prefix` and `infix` entries only.
-- `cmdset` supports direct command membership only.
-- `stmtset` references one named command set and one named operator set.
+- `operators` supports `prefix` and `infix` entries only.
+- `statements` supports direct statement membership only.
+- `language` references one named statement set and one named operator set.
 - `cmd --evaluate Name` selects the operator set used to parse invocation arguments.
-- `} :: Name` selects the statement set used to parse and execute the command body.
+- `} :: Name` selects the language used to parse and execute the command body.
 
 ## Quick start
 

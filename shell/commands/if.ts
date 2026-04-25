@@ -3,10 +3,10 @@ import { evaluateLangExpression } from "../../lang/expression.js";
 import { executeBodyStatements } from "../utils/body.js";
 import type { ShellCommandExecutor } from "./types.js";
 
-export const executeIfCommand: ShellCommandExecutor = (command, context, environment) => {
+export const executeIfCommand: ShellCommandExecutor = (command, context, environment, scope) => {
   const conditionValue = command.args.condition as ExpressionNode;
-  const thenBlockArg = command.args.then as NestedBlockNode;
-  const elseBlockArg = command.args.else as NestedBlockNode | undefined;
+  const thenBlockArg = command.blocks.then as NestedBlockNode;
+  const elseBlockArg = command.blocks.else as NestedBlockNode | undefined;
 
   const conditionResult = evaluateConditionExpression(conditionValue, environment);
   const selectedBlock = conditionResult ? thenBlockArg : elseBlockArg;
@@ -14,7 +14,7 @@ export const executeIfCommand: ShellCommandExecutor = (command, context, environ
     return undefined;
   }
 
-  const outputs = executeBodyStatements(selectedBlock.content, context, environment, selectedBlock.scope);
+  const outputs = executeBodyStatements(selectedBlock.content, context, environment, scope);
   return outputs.length > 0 ? outputs.join("\n") : undefined;
 };
 

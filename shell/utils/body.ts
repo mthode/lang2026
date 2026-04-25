@@ -13,7 +13,7 @@ export function executeBodyStatements(
 
   for (const line of lines) {
     const statement = context.parseLine(line.content, environment, line.startLine, scope);
-    const output = context.executeStatement(statement, environment);
+    const output = context.executeStatement(statement, environment, scope);
     if (output !== undefined) {
       outputs.push(output);
     }

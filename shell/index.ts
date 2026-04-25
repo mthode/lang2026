@@ -1,4 +1,4 @@
-import { createParser, type CommandNode, type ParserConfig, type Language, type StatementNode } from "../parser/index.js";
+import { createParser, type NamedStatementNode, type ParserConfig, type Language, type StatementNode } from "../parser/index.js";
 import { splitLogicalLinesWithMetadata } from "../scanner/index.js";
 import type { ReplCallbacks } from "../repl/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
@@ -6,32 +6,33 @@ import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
 import { executeCdCommand } from "./commands/cd.js";
 import { executeFuncCommand } from "./commands/function.js";
-import { executeCmdsetCommand, executeOpsetCommand, executeStmtsetCommand } from "./commands/language-object.js";
+import { executeLanguageCommand, executeOperatorsCommand, executeStatementsCommand } from "./commands/language-object.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
+import { executeStmtCommand } from "./commands/statement.js";
 import { executeWhileCommand } from "./commands/while.js";
-import { translateBuiltInInvocation } from "./commands/builtin-invocation.js";
 import { createShellEnvironment, type ShellCommandContext, type ShellCommandExecutor, type ShellEnvironment } from "./commands/types.js";
 import { splitArgumentSegments } from "./utils/arguments.js";
 import { evaluateLangExpression, substituteStatementVariables } from "../lang/expression.js";
-import { getCommandArgumentSource, toParserConfig } from "../parser/index.js";
-import { shellStatementSet } from "./custom-language.js";
+import { getStatementArgumentSource, toParserConfig } from "../parser/index.js";
+import { shellLanguage } from "./custom-language.js";
 export { evaluateLangExpression as evaluateShellExpression } from "../lang/expression.js";
 
-const shellParserConfig: ParserConfig = toParserConfig(shellStatementSet);
+const shellParserConfig: ParserConfig = toParserConfig(shellLanguage);
 
 const shellParser = createParser(shellParserConfig);
 
 const commandExecutors: Record<string, ShellCommandExecutor> = {
   cd: executeCdCommand,
   cmd: executeCmdCommand,
-  cmdset: executeCmdsetCommand,
   func: executeFuncCommand,
   eval: executeEvalCommand,
   echo: executeEchoCommand,
   if: executeIfCommand,
-  opset: executeOpsetCommand,
-  stmtset: executeStmtsetCommand,
+  language: executeLanguageCommand,
+  operators: executeOperatorsCommand,
+  stmt: executeStmtCommand,
+  statements: executeStatementsCommand,
   while: executeWhileCommand,
   for: executeForCommand
 };
@@ -40,10 +41,10 @@ const commandContext: ShellCommandContext = {
   parseScript: (source, scope) => parseShellScript(source, scope),
   parseLine: (source, environment, startLine, scope) =>
     parseShellLine(substituteStatementVariables(source, environment), startLine, scope),
-  executeStatement: (statement, environment) => executeShellCommand(statement, environment)
+  executeStatement: (statement, environment, scope) => executeShellCommand(statement, environment, scope)
 };
 
-export type ShellCommandNode = CommandNode;
+export type ShellCommandNode = NamedStatementNode;
 export type ShellStatementNode = StatementNode;
 export const parseShellLine = (source: string, startLine?: number, scope?: Language) =>
   shellParser.parseLine(source, startLine, scope);
@@ -68,12 +69,12 @@ export function executeShellSource(source: string, environment: ShellEnvironment
 
   for (const line of statements) {
     const parsed = parseShellLine(substituteStatementVariables(line.content, environment), line.startLine, scope);
-    const output = executeShellCommand(parsed, environment);
+    const output = executeShellCommand(parsed, environment, scope);
     if (output !== undefined) {
       outputs.push(output);
     }
 
-    if (parsed.kind === "command") {
+    if (parsed.kind === "statement") {
       lastCommand = parsed;
     }
   }
@@ -84,7 +85,11 @@ export function executeShellSource(source: string, environment: ShellEnvironment
   };
 }
 
-export function executeShellCommand(statement: ShellStatementNode, environment: ShellEnvironment): string | undefined {
+export function executeShellCommand(
+  statement: ShellStatementNode,
+  environment: ShellEnvironment,
+  scope?: Language
+): string | undefined {
   if (statement.kind === "assignment") {
     const value = evaluateLangExpression(statement.value, environment);
     environment.variables[statement.name] = value;
@@ -93,7 +98,7 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
 
   const commandExecutor = commandExecutors[statement.name];
   if (commandExecutor) {
-    return commandExecutor(translateBuiltInInvocation(statement), commandContext, environment);
+    return commandExecutor(statement, commandContext, environment, scope);
   }
 
   if (environment.commands.has(statement.name)) {
@@ -104,7 +109,7 @@ export function executeShellCommand(statement: ShellStatementNode, environment: 
     throw new Error(`Cannot execute function '${statement.name}' as a command`);
   }
 
-  const remainder = getCommandArgumentSource(statement.raw);
+  const remainder = getStatementArgumentSource(statement.raw);
   const args = splitArgumentSegments(remainder, { decodeStringLiterals: true });
   return environment.executeOsCommand(statement.name, args);
 }

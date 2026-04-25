@@ -1,14 +1,16 @@
 import {
-  parseCommandDeclaration,
+  extractNestedBlock,
+  parseStatementDeclaration,
   parseInvocation,
   resolveNamedOperatorSet,
-  resolveNamedStatementSet,
+  resolveNamedLanguage,
   toExpressionParserConfig,
   validateDeclaration,
   validateInvocation
 } from "../../parser/index.js";
 import { renderTemplateVariables, stringifyExpression } from "../../lang/expression.js";
-import { scan } from "../../scanner/index.js";
+import { isIgnorable } from "../../parser/expression.js";
+import { scan, type Token } from "../../scanner/index.js";
 import { executeBodyStatements } from "../utils/body.js";
 import type {
   ShellCommandContext,
@@ -23,21 +25,25 @@ export const executeCmdCommand: ShellCommandExecutor = (command, _context, envir
     throw new Error("'cmd' requires: cmd COMMAND_NAME ARG_DECLS { COMMANDS }");
   }
 
-  const declaration = parseCommandDeclaration(scan(declarationSource));
+  const declarationTokens = scan(declarationSource);
+  const declaration = parseStatementDeclaration(declarationTokens);
   if (environment.expressionFunctions.has(declaration.name)) {
     throw new Error(`Cannot define command '${declaration.name}': a function with that name already exists`);
   }
+  const implementationBlock = getSingleImplementationBlock(extractCommandImplementationBlocks(declarationTokens), declaration.name);
 
   const argumentOperatorSet = declaration.argumentOperatorSetName
     ? resolveNamedOperatorSet(environment.operatorSets, declaration.argumentOperatorSetName)
     : undefined;
-  const bodyLanguage = declaration.bodyStatementSetName
-    ? resolveNamedStatementSet(environment.statementSets, declaration.bodyStatementSetName)
+  const bodyLanguage = implementationBlock.languageName
+    ? resolveNamedLanguage(environment.languages, implementationBlock.languageName)
     : undefined;
 
   validateDeclaration(declaration, new Set(environment.commands.keys()));
   environment.commands.set(declaration.name, {
     declaration,
+    implementationBody: implementationBlock.content,
+    ...(implementationBlock.languageName ? { bodyLanguageName: implementationBlock.languageName } : {}),
     argumentOperatorSet,
     bodyLanguage
   });
@@ -58,12 +64,14 @@ export function executeUserCommand(
   const invocation = parseInvocation(
     scan(statementRaw),
     definition.declaration,
-    definition.argumentOperatorSet ? toExpressionParserConfig(definition.argumentOperatorSet) : undefined
+    definition.argumentOperatorSet
+      ? { expressionConfig: toExpressionParserConfig(definition.argumentOperatorSet) }
+      : undefined
   );
   validateInvocation(invocation, definition.declaration);
 
   const renderedArgs = toTemplateVariables(invocation, definition);
-  const resolvedBody = renderTemplateVariables(definition.declaration.body.content, renderedArgs);
+  const resolvedBody = renderTemplateVariables(definition.implementationBody, renderedArgs);
 
   const outputs = executeBodyStatements(resolvedBody, context, environment, definition.bodyLanguage);
 
@@ -164,4 +172,221 @@ function readRawVararg(value: unknown): string[] {
   }
 
   return [];
+}
+
+interface CommandImplementationBlock {
+  name: string;
+  content: string;
+  required: boolean;
+  allowMultiple: boolean;
+  languageName?: string;
+}
+
+interface CommandDeclarationParserState {
+  tokens: Token[];
+  index: number;
+}
+
+function skipIgnorable(state: CommandDeclarationParserState): void {
+  while (state.index < state.tokens.length && isIgnorable(state.tokens[state.index]!)) {
+    state.index += 1;
+  }
+}
+
+function peekNonIgnorable(state: CommandDeclarationParserState, lookahead = 0): Token | undefined {
+  let cursor = state.index;
+  let seen = 0;
+
+  while (cursor < state.tokens.length) {
+    const token = state.tokens[cursor]!;
+    if (!isIgnorable(token)) {
+      if (seen === lookahead) {
+        return token;
+      }
+      seen += 1;
+    }
+    cursor += 1;
+  }
+
+  return undefined;
+}
+
+function consumeNonIgnorable(state: CommandDeclarationParserState): Token | undefined {
+  skipIgnorable(state);
+  const token = state.tokens[state.index];
+  if (!token) {
+    return undefined;
+  }
+  state.index += 1;
+  return token;
+}
+
+function isIdentifierToken(token: Token | undefined): token is Token {
+  return token?.type === "identifier";
+}
+
+function parseEvaluateAnnotation(state: CommandDeclarationParserState): void {
+  const marker = peekNonIgnorable(state);
+  const keyword = peekNonIgnorable(state, 1);
+
+  if (marker?.value !== "--" || !isIdentifierToken(keyword) || keyword.value !== "evaluate") {
+    return;
+  }
+
+  consumeNonIgnorable(state);
+  consumeNonIgnorable(state);
+  const nameToken = consumeNonIgnorable(state);
+  if (!isIdentifierToken(nameToken) || nameToken.value === "_") {
+    throw new Error("Expected operator set name after '--evaluate'");
+  }
+
+  const repeatedMarker = peekNonIgnorable(state);
+  const repeatedKeyword = peekNonIgnorable(state, 1);
+  if (repeatedMarker?.value === "--" && isIdentifierToken(repeatedKeyword) && repeatedKeyword.value === "evaluate") {
+    throw new Error("Repeated '--evaluate' annotation");
+  }
+}
+
+function previousNonIgnorableIndex(tokens: Token[], fromExclusive: number): number {
+  let index = fromExclusive - 1;
+  while (index >= 0 && isIgnorable(tokens[index]!)) {
+    index -= 1;
+  }
+  return index;
+}
+
+function findBlockOpenTokenIndex(tokens: Token[], closeIndex: number): number {
+  let depth = 0;
+  for (let i = closeIndex; i >= 0; i -= 1) {
+    const token = tokens[i]!;
+    if (token.type !== "delimiter") {
+      continue;
+    }
+    if (token.value === "}") {
+      depth += 1;
+    } else if (token.value === "{") {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+
+  throw new Error("Unterminated nested block");
+}
+
+function sourceIndexAtToken(tokens: Token[], tokenIndex: number): number {
+  let offset = 0;
+  for (let i = 0; i < tokenIndex; i += 1) {
+    offset += tokens[i]?.value.length ?? 0;
+  }
+  return offset;
+}
+
+function hasBlockCloseTokenBefore(tokens: Token[], beforeIndex: number, minIndex: number): boolean {
+  for (let i = beforeIndex - 1; i >= minIndex; i -= 1) {
+    if (tokens[i]?.value === "}") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function extractCommandImplementationBlocks(tokens: Token[]): CommandImplementationBlock[] {
+  const state: CommandDeclarationParserState = { tokens, index: 0 };
+  parseEvaluateAnnotation(state);
+
+  while (true) {
+    const keyword = peekNonIgnorable(state, 0);
+    const marker = peekNonIgnorable(state, 1);
+    if (!isIdentifierToken(keyword) || marker?.value !== "?") {
+      break;
+    }
+    consumeNonIgnorable(state);
+    consumeNonIgnorable(state);
+  }
+
+  const nameToken = consumeNonIgnorable(state);
+  if (!isIdentifierToken(nameToken) || nameToken.value === "_") {
+    throw new Error("Expected command name after qualifiers");
+  }
+
+  const blocks: CommandImplementationBlock[] = [];
+  const rawSource = tokens.map((token) => token.value).join("");
+  let endExclusive = tokens.length;
+
+  while (true) {
+    let cursor = previousNonIgnorableIndex(tokens, endExclusive);
+    if (cursor < state.index) {
+      break;
+    }
+
+    let languageName: string | undefined;
+    const annotationNameIndex = cursor;
+    if (isIdentifierToken(tokens[annotationNameIndex]) && previousNonIgnorableIndex(tokens, annotationNameIndex) >= state.index) {
+      const annotationMarkerIndex = previousNonIgnorableIndex(tokens, annotationNameIndex);
+      if (tokens[annotationMarkerIndex]?.value === "::") {
+        languageName = tokens[annotationNameIndex]!.value;
+        if (previousNonIgnorableIndex(tokens, annotationMarkerIndex) >= state.index && tokens[previousNonIgnorableIndex(tokens, annotationMarkerIndex)]?.value === "::") {
+          throw new Error("Repeated block annotation ':: Name'");
+        }
+        endExclusive = annotationMarkerIndex;
+        cursor = previousNonIgnorableIndex(tokens, endExclusive);
+      }
+    } else if (tokens[cursor]?.value === "::") {
+      throw new Error("Expected language name after '::'");
+    }
+
+    if (languageName !== undefined && cursor >= state.index && tokens[cursor]?.value !== "}") {
+      if (isIdentifierToken(tokens[cursor]) && tokens[previousNonIgnorableIndex(tokens, cursor)]?.value === "::") {
+        throw new Error("Repeated block annotation ':: Name'");
+      }
+      throw new Error("Unexpected content after statement block");
+    }
+
+    if (cursor < state.index || tokens[cursor]?.value !== "}") {
+      break;
+    }
+
+    const closeIndex = cursor;
+    const openIndex = findBlockOpenTokenIndex(tokens, closeIndex);
+    const block = extractNestedBlock(rawSource, sourceIndexAtToken(tokens, openIndex));
+
+    let blockName = "body";
+    let blockStartIndex = openIndex;
+    const possibleNameIndex = previousNonIgnorableIndex(tokens, openIndex);
+    if (
+      possibleNameIndex >= state.index &&
+      isIdentifierToken(tokens[possibleNameIndex]) &&
+      (blocks.length > 0 || hasBlockCloseTokenBefore(tokens, possibleNameIndex, state.index))
+    ) {
+      blockName = tokens[possibleNameIndex]!.value;
+      blockStartIndex = possibleNameIndex;
+    }
+
+    blocks.unshift({
+      name: blockName,
+      content: block.content,
+      required: true,
+      allowMultiple: false,
+      ...(languageName !== undefined ? { languageName } : {})
+    });
+
+    endExclusive = blockStartIndex;
+  }
+
+  return blocks;
+}
+
+function getSingleImplementationBlock(blocks: CommandImplementationBlock[], commandName?: string) {
+  if (blocks.length !== 1) {
+    throw new Error(`Command '${commandName ?? "<unknown>"}' must declare exactly one implementation block`);
+  }
+
+  const block = blocks[0]!;
+  if (block.name !== "body" || !block.required || block.allowMultiple) {
+    throw new Error(`Command '${commandName ?? "<unknown>"}' must use a single required 'body' implementation block`);
+  }
+
+  return block;
 }

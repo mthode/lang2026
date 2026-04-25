@@ -5,8 +5,8 @@
 Define the behavior for user-declared commands that:
 
 - parse their invocation arguments with a named operator set
-- parse their `{ ... }` body with a named statement set
-- refer to named language objects instead of embedding operator or command definitions inline
+- parse their `{ ... }` body with a named language
+- refer to named language objects instead of embedding operator or statement definitions inline
 
 This note is primarily about observable behavior and declaration syntax. The implementation plan at the end maps that behavior onto the current codebase.
 
@@ -15,15 +15,15 @@ This note is primarily about observable behavior and declaration syntax. The imp
 User-declared commands gain two independent language hooks:
 
 - an argument operator set, used to reduce invocation tokens into argument values before those values are bound to the command's declared arguments
-- a body statement set, used to parse and execute the command body as its own language
+- a body language, used to parse and execute the command body
 
 Those hooks refer to named, first-class objects:
 
-- `opset`: a named operator set
-- `cmdset`: a named command set
-- `stmtset`: a named statement set
+- `operators`: a named operator set
+- `statements`: a named statement set
+- `language`: a named language combining one statement set and one operator set
 
-The command declaration only names the sets it wants to use. It does not define operators or commands inline.
+The command declaration only names the objects it wants to use. It does not define operators or statements inline.
 
 ## First-Class Language Objects
 
@@ -40,36 +40,36 @@ Behaviorally, an operator set answers these questions:
 
 An operator set is used directly by command declarations and statement sets whenever they need custom expression parsing.
 
-### Command sets
-
-A command set is a named collection of commands that are legal inside a statement language.
-
-Behaviorally, a command set answers these questions:
-
-- which command names may appear at statement position
-- whether unknown commands are rejected or fall through to a default command rule
-
-For this spec, the important behavior is that a statement set names a command set, and that command set controls which commands are valid in the body language.
-
 ### Statement sets
 
-A statement set is a named statement language.
+A statement set is a named collection of statement forms that are legal inside a language.
 
-At minimum, a statement set names:
+Behaviorally, a statement set answers these questions:
 
-- the command set used to recognize statements
+- which statement names may appear at statement position
+- whether unknown statements are rejected or fall through to a default statement rule
+
+For this spec, the important behavior is that a language names a statement set, and that statement set controls which statements are valid in the body language.
+
+### Languages
+
+A language is a named parser scope.
+
+At minimum, a language names:
+
+- the statement set used to recognize statements
 - the operator set used by expression-bearing statements in that language
 
-A statement set may later include more policy, but for this spec it is the language object that owns the meaning of a command body.
+A language may later include more policy, but for this spec it is the object that owns the meaning of a command body.
 
 ## Command Declaration Extension
 
 User-declared commands keep their existing argument declaration grammar and gain two optional language references:
 
 - `--evaluate <OpSetName>`
-- a statement-set spec that is attached to the body it customizes
+- a language spec that is attached to the body it customizes
 
-The operator-set reference appears before the command name so it stays clearly separate from `ArgDecls`. The statement-set reference should belong to the body surface, not to the argument declaration region.
+The operator-set reference appears before the command name so it stays clearly separate from `ArgDecls`. The language reference should belong to the body surface, not to the argument declaration region.
 
 ### Proposed shape
 
@@ -80,9 +80,9 @@ ArgExprSpec ::= "--evaluate" Name
 
 BodyWithSpec ::= Body BodyStmtSpec?
 BodyStmtSpec ::= "::" Name
-Body ::= "{" CommandSet "}"
-CommandSet ::= zero or more Command entries in the selected statement language
-Command ::= a command recognized by the selected command set
+Body ::= "{" StatementText "}"
+StatementText ::= zero or more statement entries in the selected language
+Statement ::= a statement recognized by the selected statement set
 ```
 
 This keeps the expression hook out of the argument declaration space while making the body-language hook visually belong to the brace block it affects.
@@ -93,7 +93,7 @@ The strongest default is:
 
 ```ebnf
 BodyStmtSpec ::= "::" Name
-BodyWithSpec ::= "{" CommandSet "}" ("::" Name)?
+BodyWithSpec ::= "{" StatementText "}" ("::" Name)?
 ```
 
 This yields:
@@ -102,7 +102,7 @@ This yields:
 cmd render name {
   text "Hello"
   slot name
-} :: template_stmt
+} :: template_lang
 ```
 
 This is the recommended direction because:
@@ -111,13 +111,13 @@ This is the recommended direction because:
 - it leaves `ArgDecls` visually untouched
 - it extends naturally if a future command has more than one body
 
-If multiple body sections are added later, each body can carry its own statement-set spec:
+If multiple body sections are added later, each body can carry its own language spec:
 
 ```text
 cmd choose condition then { ... } :: then_lang else { ... } :: else_lang
 ```
 
-The section labels such as `then` and `else` are future work. The important groundwork is that the statement-set spec is owned by an individual body.
+The section labels such as `then` and `else` are future work. The important groundwork is that the language spec is owned by an individual body.
 
 ### Examples
 
@@ -129,7 +129,7 @@ cmd --evaluate math_ops my_math value {
 cmd render name {
   text "Hello"
   slot name
-} :: template_stmt
+} :: template_lang
 
 cmd --evaluate shell_ops pipeline first second {
   run first
@@ -142,17 +142,17 @@ cmd --evaluate shell_ops pipeline first second {
 The exact token-level grammar for set declarations can still change, but the intended behavior is based on three top-level declaration forms:
 
 ```ebnf
-OpSetDecl   ::= "opset" Name OpSetBody
-CmdSetDecl  ::= "cmdset" Name CmdSetBody
-StmtSetDecl ::= "stmtset" Name "commands" Name "operators" Name
+OperatorSetDecl  ::= "operators" Name OperatorSetBody
+StatementSetDecl ::= "statements" Name StatementSetBody
+LanguageDecl     ::= "language" Name "statements" Name "operators" Name
 ```
 
 The important part of this spec is the reference structure:
 
-- `stmtset` refers to `cmdset` and `opset` by name
-- `cmd` refers to `opset` and `stmtset` by name
+- `language` refers to `statements` and `operators` by name
+- `cmd` refers to `operators` and `language` by name
 
-No anonymous or inline expression, statement, operator, or command sets are allowed in a command declaration.
+No anonymous or inline expression, statement, operator, or language objects are allowed in a command declaration.
 
 ## Invocation Semantics For Command Arguments
 
@@ -167,7 +167,7 @@ That means the invocation parser must not treat whitespace-separated tokens as f
 Given:
 
 ```text
-opset math_ops { infix + precedence 7 left }
+operators math_ops { infix + precedence 7 left }
 cmd --evaluate math_ops my_math value { echo $value }
 ```
 
@@ -235,7 +235,7 @@ In other words, the custom operator set is opt-in per command.
 
 ## Core rule
 
-If a command attaches a statement-set spec to a body, the text inside that `{ ... }` body is parsed and executed as that statement set's language.
+If a command attaches a language spec to a body, the text inside that `{ ... }` body is parsed and executed with that language.
 
 The command body is therefore not locked to the host shell language. A command may introduce a different body language while remaining callable from the outer shell.
 
@@ -244,30 +244,30 @@ The command body is therefore not locked to the host shell language. A command m
 Given:
 
 ```text
-cmdset template_cmds { text slot repeat }
-stmtset template_stmt commands template_cmds operators template_ops
+statements template_statements { text slot repeat }
+language template_lang statements template_statements operators template_ops
 
 cmd render name {
   text "Hello"
   slot name
-} :: template_stmt
+} :: template_lang
 ```
 
-The body is interpreted using `template_stmt`, not the default shell parser.
+The body is interpreted using `template_lang`, not the default shell parser.
 
-### Statement-set ownership
+### Language ownership
 
-The selected statement set controls:
+The selected language controls:
 
-- which commands are legal at statement position inside the body
+- which statements are legal at statement position inside the body
 - how expression-bearing statements inside that body parse their expressions
 - how nested `{ ... }` blocks inside that body are interpreted
 
-By default, nested blocks inside a body inherit the same statement set unless the enclosing statement form explicitly says otherwise.
+By default, nested blocks inside a body inherit the same language unless the enclosing statement form explicitly says otherwise.
 
 ### Independence from argument expression parsing
 
-The argument operator set and the body statement set are independent.
+The argument operator set and the body language are independent.
 
 This is valid and intentional:
 
@@ -275,14 +275,14 @@ This is valid and intentional:
 cmd --evaluate math_ops report value {
   text "Result"
   slot value
-} :: template_stmt
+} :: template_lang
 ```
 
-Here the invocation arguments use `math_ops`, while the body uses `template_stmt`.
+Here the invocation arguments use `math_ops`, while the body uses `template_lang`.
 
 ### Default behavior
 
-If a body-bound statement-set spec is omitted, the command body uses the host language's normal body parsing behavior.
+If a body-bound language spec is omitted, the command body uses the host language's normal body parsing behavior.
 
 ## Name Resolution And Lifetime
 
@@ -291,9 +291,9 @@ All language references are by name, but the binding behavior should be explicit
 This spec adopts the following rule:
 
 - named sets are resolved when the declaring object is created
-- a command captures the referenced operator set and statement set at command declaration time
-- a statement set captures its referenced command set and operator set when it is declared
-- later redefinition of a set name does not retroactively change already-declared commands or statement sets
+- a command captures the referenced operator set and language at command declaration time
+- a language captures its referenced statement set and operator set when it is declared
+- later redefinition of a set name does not retroactively change already-declared commands or languages
 
 This gives stable behavior and avoids commands silently changing meaning because some shared language object was redefined later.
 
@@ -301,20 +301,20 @@ This gives stable behavior and avoids commands silently changing meaning because
 
 The following are specification-level errors:
 
-- a `cmd` references an unknown `opset`
-- a `cmd` references an unknown `stmtset`
-- a `stmtset` references an unknown `cmdset`
-- a `stmtset` references an unknown `opset`
+- a `cmd` references an unknown operator set
+- a `cmd` references an unknown language
+- a `language` references an unknown statement set
+- a `language` references an unknown operator set
 - duplicate names within the same object kind are not allowed
 - inline operator definitions inside `cmd`
-- inline command-set definitions inside `cmd`
+- inline statement-set definitions inside `cmd`
 
 The following are semantic constraints on behavior:
 
 - argument expression parsing must be deterministic for a given declaration and token stream
 - clause keywords are recognized before they can be swallowed by an expression parse
-- body parsing must reject commands that are not present in the selected command set
-- nested blocks inside a statement set inherit that same statement set unless another rule explicitly overrides it
+- body parsing must reject statements that are not present in the selected statement set
+- nested blocks inside a language inherit that same language unless another rule explicitly overrides it
 
 ## Resulting Mental Model
 
@@ -330,9 +330,9 @@ Those languages are connected by named references rather than by inline syntax.
 
 These questions are intentionally left for later design and implementation work:
 
-- the exact concrete syntax inside `opset` and `cmdset` bodies
+- the exact concrete syntax inside `operators` and `statements` bodies
 - whether set declarations are allowed only at top level or also inside nested scopes
-- whether command sets support import, extension, or composition
+- whether statement sets support import, extension, or composition
 - how body-language variables and command arguments are surfaced to a custom statement runtime
 - whether custom statement sets can introduce non-command statement forms beyond the existing command-line model
 
@@ -346,9 +346,9 @@ The implementation should be done in small phases so that command declaration pa
 
 **Files:** `shell/commands/types.ts`, `shell/index.ts`, possibly a new shared type file such as `lang/custom-language.ts`
 
-- Define runtime shapes for `OperatorSetDefinition`, `CommandSetDefinition`, and `Language`.
-- Extend `ShellEnvironment` with maps for named operator sets, command sets, and statement sets.
-- Seed the environment with at least one default operator set and one default statement set that reflect the current shell behavior.
+- Define runtime shapes for `OperatorSetDefinition`, `StatementSetDefinition`, and `Language`.
+- Extend `ShellEnvironment` with maps for named operator sets, statement sets, and languages.
+- Seed the environment with at least one default operator set, statement set, and language that reflect the current shell behavior.
 - Keep the first release simple: named sets are resolved from these registries, not computed ad hoc.
 
 **Tests:** Add shell-environment tests that verify the default registries exist and that duplicate-name checks behave as expected.
@@ -359,7 +359,7 @@ Status: complete.
 
 This refactor is implemented. The parser now owns the reusable language-definition model, the shell layer consumes those parser-owned types for registry bootstrapping, and focused parser and shell tests cover the representation boundaries described below. Remaining implementation work for this feature starts at Phase 2.
 
-The syntax for declaring `opset`, `cmdset`, and `stmtset` belongs in the shell layer because those declarations are shell commands. The language objects being declared do not. They are parser-facing constructs and should live alongside the rest of the parsing model.
+The syntax for declaring `operators`, `statements`, and `language` belongs in the shell layer because those declarations are shell commands. The language objects being declared do not. They are parser-facing constructs and should live alongside the rest of the parsing model.
 
 The current codebase already has several parser objects that serve roles very close to the new Phase 1 shell registries. Before adding more declaration and execution features, those abstractions should be aligned so the parser remains the source of truth for language definition.
 
@@ -371,8 +371,8 @@ The current codebase already has several parser objects that serve roles very cl
 - `ExpressionOperatorOverrides` in `parser/expression.ts`
   Provides per-argument operator overrides layered on top of an ambient expression config.
 
-- `Language` in `parser/command.ts`
-  Describes a statement language scope: operator tables, command definitions, assignment support, strict-command behavior, and the fallback command definition.
+- `Language` in `parser/statement.ts`
+  Describes a statement language scope: operator tables, statement definitions, assignment support, strict-statement behavior, and the fallback statement definition.
 
 - `ParserConfig` in `parser/command.ts`
   The top-level parser construction input. It is effectively a required form of parser scope plus parser-global defaults.
@@ -380,13 +380,13 @@ The current codebase already has several parser objects that serve roles very cl
 - `ResolvedParserScope` in `parser/command.ts`
   The normalized internal scope used while parsing. It is produced by combining the top-level parser config with nested overrides.
 
-- `CommandDefinition` in `parser/command.ts`
+- `StatementDefinition` in `parser/statement.ts`
   Describes how one statement-form command parses its arguments in a given statement language.
 
-- `CommandArgumentDefinition` and `ArgumentInfo` in `parser/command.ts`
+- `StatementArgumentDefinition` and `PartInfo` in `parser/statement.ts`
   Describe the parse behavior of individual arguments, including nested-block scope overrides and expression-operator overrides.
 
-- `NestedBlockNode.scope` in `parser/command.ts`
+- `NestedBlockNode.scope` in `parser/statement.ts`
   Carries a parser scope forward so a nested body can later be parsed in the correct language.
 
 - `CommandDeclaration` in `parser/declaration.ts`
@@ -399,13 +399,13 @@ The current codebase already has several parser objects that serve roles very cl
   Apply a `CommandDeclaration` to invocation tokens and enforce its semantic rules.
 
 - `shell/custom-language.ts`
-  Currently introduces `OperatorSetDefinition`, `CommandSetDefinition`, and seeded shell language registries. These are parser-facing concepts, but the shell layer still bootstraps the built-in shell instances.
+  Currently introduces seeded shell language registries using parser-owned `OperatorSetDefinition`, `StatementSetDefinition`, and `Language`.
 
 #### Relationship summary
 
 - `OperatorSetDefinition` is conceptually a named wrapper around the operator-table part of `ExpressionParserConfig`.
-- `CommandSetDefinition` is conceptually a named wrapper around the command-table part of `Language`, plus `strictCommands` and `defaultCommand` behavior.
-- `Language` is the reusable executable statement-language shape assembled from operator definitions, command definitions, and parser behavior flags.
+- `StatementSetDefinition` is conceptually a named wrapper around the statement-table part of `Language`, plus `strictStatements` and `defaultStatement` behavior.
+- `Language` is the reusable executable statement-language shape assembled from operator definitions, statement definitions, and parser behavior flags.
 - `NestedBlockNode.scope` is already the mechanism that propagates statement-language context into deferred body parsing.
 - `CommandDeclaration` is the bridge between shell-level declaration syntax and parser-level language objects.
 
@@ -417,7 +417,7 @@ The overlap is useful, but leaving both models independent would create two comp
 
 **Files:** new parser module such as `parser/language.ts`, plus `parser/index.ts`
 
-- Move or recreate `OperatorSetDefinition`, `CommandSetDefinition`, and `Language` under the parser directory.
+- Move or recreate `OperatorSetDefinition`, `StatementSetDefinition`, and `Language` under the parser directory.
 - Export these types from `parser/index.ts` so both shell code and future parser helpers use one shared definition source.
 - Keep the first move type-only if necessary to minimize churn.
 
@@ -427,8 +427,8 @@ The overlap is useful, but leaving both models independent would create two comp
 
 - Add helper functions that convert:
   - `OperatorSetDefinition` -> `ExpressionParserConfig` operator tables
-  - `CommandSetDefinition` -> the command-related part of `Language`
-  - named operator and command sets -> a resolved `Language`
+  - `StatementSetDefinition` -> the statement-related part of `Language`
+  - named operator and statement sets -> a resolved `Language`
 - Make these conversions explicit rather than scattering ad hoc object reshaping throughout the shell runtime.
 
 ##### Phase 1B-3: Remove the old `ParserDefinition` split
@@ -468,13 +468,13 @@ After Phase 1B:
 
 - the parser directory owns the reusable language-definition model
 - the shell directory owns declaration syntax, built-in shell seeded values, and runtime registration
-- later phases can implement `opset`, `cmdset`, `stmtset`, `--evaluate`, and `:: Name` without introducing a second competing parsing model
+- later phases can implement `operators`, `statements`, `language`, `--evaluate`, and `:: Name` without introducing a second competing parsing model
 
-### Phase 2: Add declaration commands for `opset`, `cmdset`, and `stmtset`
+### Phase 2: Add declaration commands for `operators`, `statements`, and `language`
 
 **Files:** `shell/index.ts`, new command executors under `shell/commands/`, parser-owned language-object helpers under `parser/`
 
-- Add built-in commands `opset`, `cmdset`, and `stmtset`, each taking a raw declaration body the same way `cmd` and `func` already do.
+- Add built-in commands `operators`, `statements`, and `language`, each taking a raw declaration body the same way `cmd` and `func` already do.
 - Register these commands in the shell parser config and command executor table.
 - For the first implementation, keep declaration parsing local to these executors and produce validated runtime definitions that are stored in the environment registries.
 - Reject duplicate names and unknown referenced names at declaration time.
@@ -498,7 +498,7 @@ After Phase 1B:
 **Files:** parser-owned language-object helpers plus `shell/commands/command.ts`
 
 - Add a resolution layer that turns a named operator set into the `prefixOperators` and `infixOperators` config expected by the expression parser.
-- Add a resolution layer that turns a statement set into a `Language` by combining its referenced command set and operator set.
+- Add a resolution layer that turns a language declaration into a `Language` by combining its referenced statement set and operator set.
 - Reuse the existing `Language` and nested-scope machinery rather than building a second statement-parsing path.
 - Resolve names when the owning declaration is created so commands capture stable behavior even if a set is later redefined.
 
@@ -516,22 +516,22 @@ After Phase 1B:
 
 **Tests:** Add parser tests for examples like `my_math 2 + 2`, multiple expression arguments in one invocation, keyword boundaries, vararg boundaries, and error cases for incomplete expressions.
 
-### Phase 6: Execute bodies with the selected statement set
+### Phase 6: Execute bodies with the selected language
 
 **Files:** `shell/commands/command.ts`, `shell/utils/body.ts`, `shell/commands/types.ts`
 
 - Resolve the command body's optional `:: Name` annotation to a `Language` before executing the body.
-- Pass that resolved scope into `executeBodyStatements(...)` so body parsing uses the selected statement set instead of the ambient shell parser.
+- Pass that resolved scope into `executeBodyStatements(...)` so body parsing uses the selected language instead of the ambient shell parser.
 - Ensure nested blocks parsed inside that body inherit the same statement-set scope by default unless a later statement form explicitly overrides it.
 - Keep template-variable rendering separate from statement parsing so command argument substitution continues to work with custom body languages.
 
-**Tests:** Add shell and scripting tests proving that a command body can run under a custom statement set and that unsupported commands are rejected inside that body.
+**Tests:** Add shell and scripting tests proving that a command body can run under a custom language and that unsupported statements are rejected inside that body.
 
-### Phase 7: Define first-release declaration bodies for `opset` and `cmdset`
+### Phase 7: Define first-release declaration bodies for `operators` and `statements`
 
 **Files:** new parser helpers plus tests
 
-- Finalize the minimal concrete syntax for `opset` and `cmdset` bodies.
+- Finalize the minimal concrete syntax for `operators` and `statements` bodies.
 - Keep the first release intentionally narrow: enough to express operator definitions, command membership, and the statement-set references already described in this note.
 - Avoid imports, extension, or composition in the first slice; those can be added later without blocking the core feature.
 
@@ -542,7 +542,7 @@ After Phase 1B:
 **Files:** `parser/README.md`, `README.md`, relevant test files under `test/`
 
 - Update the parser and shell documentation to show the new declaration forms.
-- Add end-to-end tests that declare an operator set, declare a statement set, define a command using both, and then execute that command successfully.
-- Add one failure-path end-to-end test for each major validation rule: unknown set names, invalid body annotation, and disallowed commands inside a custom statement set.
+- Add end-to-end tests that declare an operator set, declare a statement set, define a language, define a command using both hooks, and then execute that command successfully.
+- Add one failure-path end-to-end test for each major validation rule: unknown set names, invalid body annotation, and disallowed statements inside a custom language.
 
 This sequence keeps the risky parser work isolated until the registry model and runtime resolution path are in place, and it ensures each slice has direct unit-test coverage before the next phase begins.

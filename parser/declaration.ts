@@ -1,5 +1,5 @@
 import type { Token } from "../scanner/index.js";
-import { extractNestedBlock, type ArgumentValue, type NestedBlockNode } from "./command.js";
+import { type ArgumentValue, type NestedBlockNode } from "./statement.js";
 import { isIgnorable } from "./expression.js";
 
 export interface PositionalArgDecl {
@@ -12,11 +12,16 @@ export interface VarargDecl {
   trailingNamedArgs: string[];
 }
 
+export interface ClauseBlockDecl {
+  languageName?: string;
+}
+
 export interface KeyedClauseDecl {
   keyword: string;
   required: boolean;
   allowMultiple: boolean;
   argDecls: ArgDeclGroup;
+  block?: ClauseBlockDecl;
 }
 
 export interface QualifierDecl {
@@ -29,13 +34,19 @@ export interface ArgDeclGroup {
   vararg?: VarargDecl;
 }
 
-export interface CommandDeclaration {
+export interface StatementBlockDecl {
+  name: string;
+  required: boolean;
+  allowMultiple: boolean;
+  languageName?: string;
+}
+
+export interface StatementDeclaration {
   name: string;
   argumentOperatorSetName?: string;
   qualifiers: QualifierDecl[];
   argDecls: ArgDeclGroup;
-  body: NestedBlockNode;
-  bodyStatementSetName?: string;
+  blocks: StatementBlockDecl[];
   globalKeywords: Set<string>;
 }
 
@@ -46,15 +57,20 @@ export interface ParsedArguments {
   clauses: Record<string, ParsedArguments[]>;
 }
 
-export interface ParsedCommand {
-  commandName: string;
+export interface ParsedStatement {
+  statementName: string;
   qualifiers: Record<string, boolean>;
   arguments: ParsedArguments;
+  blocks: Record<string, NestedBlockNode[]>;
 }
 
 interface DeclarationParserState {
   tokens: Token[];
   index: number;
+}
+
+interface ParsedArgDeclGroup extends ArgDeclGroup {
+  block?: ClauseBlockDecl;
 }
 
 function isIdentifierToken(token: Token | undefined): token is Token {
@@ -127,45 +143,54 @@ function parseEvaluateAnnotation(state: DeclarationParserState): string | undefi
   return nameToken.value;
 }
 
-function parseBodyStatementAnnotation(tokens: Token[]): string | undefined {
-  const trailingTokens = tokens.filter((token) => !isIgnorable(token));
-  if (trailingTokens.length === 0) {
+function parseBlockAnnotation(state: DeclarationParserState): string | undefined {
+  const marker = peekNonIgnorable(state);
+  if (marker?.value !== "::") {
     return undefined;
   }
 
-  const marker = trailingTokens[0];
-  if (marker?.value !== "::") {
-    throw new Error("Unexpected content after command body");
-  }
-
-  const nameToken = trailingTokens[1];
+  consumeNonIgnorable(state);
+  const nameToken = consumeNonIgnorable(state);
   if (!isIdentifierToken(nameToken) || nameToken.value === "_") {
-    throw new Error("Expected statement set name after '::'");
+    throw new Error("Expected language name after '::'");
   }
 
-  if (trailingTokens.length === 2) {
-    return nameToken.value;
+  const repeatedMarker = peekNonIgnorable(state);
+  if (repeatedMarker?.value === "::") {
+    throw new Error("Repeated block annotation ':: Name'");
   }
 
-  if (trailingTokens[2]?.value === "::") {
-    throw new Error("Repeated body annotation ':: Name'");
-  }
-
-  throw new Error("Unexpected content after command body");
+  return nameToken.value;
 }
 
-function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | undefined): ArgDeclGroup {
+function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | undefined): ParsedArgDeclGroup {
   const positional: PositionalArgDecl[] = [];
   const keyedClauses: KeyedClauseDecl[] = [];
   let vararg: VarargDecl | undefined;
+  let block: ClauseBlockDecl | undefined;
 
   let sawOptional = false;
   let sawKeyed = false;
 
   while (true) {
     const token = peekNonIgnorable(state);
-    if (!token || (stopToken && token.value === stopToken) || token.value === "{") {
+    if (!token || (stopToken && token.value === stopToken) || (!stopToken && token.value === "{")) {
       break;
+    }
+
+    if (block) {
+      throw new Error("Block marker '{}' must be the last item in a keyed clause declaration");
+    }
+
+    if (stopToken && token.value === "{") {
+      consumeNonIgnorable(state);
+      const closeToken = consumeNonIgnorable(state);
+      if (!closeToken || closeToken.value !== "}") {
+        throw new Error("Expected '}' to complete block marker '{}'");
+      }
+      const languageName = parseBlockAnnotation(state);
+      block = languageName !== undefined ? { languageName } : {};
+      continue;
     }
 
     if (token.value === "...") {
@@ -217,7 +242,12 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
         keyword: keywordToken.value,
         required: opener.value === "(",
         allowMultiple,
-        argDecls
+        argDecls: {
+          positional: argDecls.positional,
+          keyedClauses: argDecls.keyedClauses,
+          ...(argDecls.vararg ? { vararg: argDecls.vararg } : {})
+        },
+        ...(argDecls.block ? { block: argDecls.block } : {})
       });
       sawKeyed = true;
       continue;
@@ -264,7 +294,8 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
   return {
     positional,
     keyedClauses,
-    vararg
+    vararg,
+    ...(block !== undefined ? { block } : {})
   };
 }
 
@@ -278,24 +309,24 @@ function collectGlobalKeywords(group: ArgDeclGroup, keywords: Set<string>): void
   }
 }
 
-function sourceIndexAtToken(tokens: Token[], tokenIndex: number): number {
-  let offset = 0;
-  for (let i = 0; i < tokenIndex; i += 1) {
-    offset += tokens[i]?.value.length ?? 0;
+function previousNonIgnorableIndex(tokens: Token[], fromExclusive: number): number {
+  let index = fromExclusive - 1;
+  while (index >= 0 && isIgnorable(tokens[index]!)) {
+    index -= 1;
   }
-  return offset;
+  return index;
 }
 
-function findBlockCloseTokenIndex(tokens: Token[], openIndex: number): number {
+function findBlockOpenTokenIndex(tokens: Token[], closeIndex: number): number {
   let depth = 0;
-  for (let i = openIndex; i < tokens.length; i += 1) {
+  for (let i = closeIndex; i >= 0; i -= 1) {
     const token = tokens[i]!;
     if (token.type !== "delimiter") {
       continue;
     }
-    if (token.value === "{") {
+    if (token.value === "}") {
       depth += 1;
-    } else if (token.value === "}") {
+    } else if (token.value === "{") {
       depth -= 1;
       if (depth === 0) {
         return i;
@@ -306,7 +337,87 @@ function findBlockCloseTokenIndex(tokens: Token[], openIndex: number): number {
   throw new Error("Unterminated nested block");
 }
 
-export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
+function hasBlockCloseTokenBefore(tokens: Token[], beforeIndex: number, minIndex: number): boolean {
+  for (let i = beforeIndex - 1; i >= minIndex; i -= 1) {
+    if (tokens[i]?.value === "}") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseTrailingStatementBlocks(tokens: Token[], fromIndex: number): {
+  argDeclTokens: Token[];
+  blocks: StatementBlockDecl[];
+} {
+  const blocks: StatementBlockDecl[] = [];
+  let endExclusive = tokens.length;
+
+  while (true) {
+    let cursor = previousNonIgnorableIndex(tokens, endExclusive);
+    if (cursor < fromIndex) {
+      break;
+    }
+
+    let languageName: string | undefined;
+    const annotationNameIndex = cursor;
+    if (isIdentifierToken(tokens[annotationNameIndex]) && previousNonIgnorableIndex(tokens, annotationNameIndex) >= fromIndex) {
+      const annotationMarkerIndex = previousNonIgnorableIndex(tokens, annotationNameIndex);
+      if (tokens[annotationMarkerIndex]?.value === "::") {
+        languageName = tokens[annotationNameIndex]!.value;
+        if (previousNonIgnorableIndex(tokens, annotationMarkerIndex) >= fromIndex && tokens[previousNonIgnorableIndex(tokens, annotationMarkerIndex)]?.value === "::") {
+          throw new Error("Repeated block annotation ':: Name'");
+        }
+        endExclusive = annotationMarkerIndex;
+        cursor = previousNonIgnorableIndex(tokens, endExclusive);
+      }
+    } else if (tokens[cursor]?.value === "::") {
+      throw new Error("Expected language name after '::'");
+    }
+
+    if (languageName !== undefined && cursor >= fromIndex && tokens[cursor]?.value !== "}") {
+      if (isIdentifierToken(tokens[cursor]) && tokens[previousNonIgnorableIndex(tokens, cursor)]?.value === "::") {
+        throw new Error("Repeated block annotation ':: Name'");
+      }
+      throw new Error("Unexpected content after statement block");
+    }
+
+    if (cursor < fromIndex || tokens[cursor]?.value !== "}") {
+      break;
+    }
+
+    const closeIndex = cursor;
+    const openIndex = findBlockOpenTokenIndex(tokens, closeIndex);
+
+    let blockName = "body";
+    let blockStartIndex = openIndex;
+    const possibleNameIndex = previousNonIgnorableIndex(tokens, openIndex);
+    if (
+      possibleNameIndex >= fromIndex &&
+      isIdentifierToken(tokens[possibleNameIndex]) &&
+      (blocks.length > 0 || hasBlockCloseTokenBefore(tokens, possibleNameIndex, fromIndex))
+    ) {
+      blockName = tokens[possibleNameIndex]!.value;
+      blockStartIndex = possibleNameIndex;
+    }
+
+    blocks.unshift({
+      name: blockName,
+      required: true,
+      allowMultiple: false,
+      ...(languageName !== undefined ? { languageName } : {})
+    });
+
+    endExclusive = blockStartIndex;
+  }
+
+  return {
+    argDeclTokens: tokens.slice(fromIndex, endExclusive),
+    blocks
+  };
+}
+
+export function parseStatementDeclaration(tokens: Token[]): StatementDeclaration {
   const state: DeclarationParserState = { tokens, index: 0 };
   const argumentOperatorSetName = parseEvaluateAnnotation(state);
 
@@ -329,20 +440,19 @@ export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
     throw new Error("Expected command name after qualifiers");
   }
 
-  const argDecls = parseArgDeclGroup(state, "{");
-
-  skipIgnorable(state);
-  const bodyToken = state.tokens[state.index];
-  if (!bodyToken || bodyToken.value !== "{") {
-    throw new Error("Expected command body '{ ... }'");
+  const split = parseTrailingStatementBlocks(tokens, state.index);
+  const argDeclState: DeclarationParserState = { tokens: split.argDeclTokens, index: 0 };
+  const parsedArgDecls = parseArgDeclGroup(argDeclState, undefined);
+  skipIgnorable(argDeclState);
+  if (argDeclState.index < argDeclState.tokens.length) {
+    throw new Error("Unexpected content after statement block");
   }
 
-  const rawSource = tokens.map((token) => token.value).join("");
-  const bodyStartOffset = sourceIndexAtToken(tokens, state.index);
-  const body = extractNestedBlock(rawSource, bodyStartOffset);
-
-  const closeTokenIndex = findBlockCloseTokenIndex(tokens, state.index);
-  const bodyStatementSetName = parseBodyStatementAnnotation(tokens.slice(closeTokenIndex + 1));
+  const argDecls: ArgDeclGroup = {
+    positional: parsedArgDecls.positional,
+    keyedClauses: parsedArgDecls.keyedClauses,
+    ...(parsedArgDecls.vararg ? { vararg: parsedArgDecls.vararg } : {})
+  };
 
   const globalKeywords = new Set<string>();
   collectGlobalKeywords(argDecls, globalKeywords);
@@ -352,16 +462,12 @@ export function parseCommandDeclaration(tokens: Token[]): CommandDeclaration {
     argumentOperatorSetName,
     qualifiers,
     argDecls,
-    body: {
-      kind: "nested-block",
-      content: body.content
-    },
-    bodyStatementSetName,
+    blocks: split.blocks,
     globalKeywords
   };
 }
 
-export function validateDeclaration(decl: CommandDeclaration, existingCommandNames: Set<string>): void {
+export function validateDeclaration(decl: StatementDeclaration, existingCommandNames: Set<string>): void {
   // Qualifier collisions with existing command names or clause keywords
   for (const q of decl.qualifiers) {
     if (existingCommandNames.has(q.keyword)) {
@@ -371,6 +477,25 @@ export function validateDeclaration(decl: CommandDeclaration, existingCommandNam
       throw new Error(`Qualifier keyword '${q.keyword}' collides with a keyed clause keyword`);
     }
   }
+
+  const blockNames = new Set<string>();
+  for (const block of decl.blocks) {
+    if (blockNames.has(block.name)) {
+      throw new Error(`Duplicate statement block '${block.name}'`);
+    }
+    blockNames.add(block.name);
+  }
+
+  function checkInvocationBlockCollisions(group: ArgDeclGroup): void {
+    for (const clause of group.keyedClauses) {
+      if (clause.block && blockNames.has(clause.keyword)) {
+        throw new Error(`Invocation block clause '${clause.keyword}' collides with statement block '${clause.keyword}'`);
+      }
+      checkInvocationBlockCollisions(clause.argDecls);
+    }
+  }
+
+  checkInvocationBlockCollisions(decl.argDecls);
 
   // If a group has vararg with trailing named args, no descendant may contain a vararg
   function descHasVararg(group: ArgDeclGroup): boolean {

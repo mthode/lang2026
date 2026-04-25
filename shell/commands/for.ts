@@ -6,7 +6,7 @@ import type { ShellCommandExecutor } from "./types.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export const executeForCommand: ShellCommandExecutor = (command, context, environment) => {
+export const executeForCommand: ShellCommandExecutor = (command, context, environment, scope) => {
   const iterator = command.args.iterator as ExpressionNode;
   if (iterator.kind !== "identifier") {
     throw new Error("'for' iterator must be an identifier");
@@ -15,7 +15,7 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
   const fromExpr = command.args.from as ExpressionNode;
   const toExpr = command.args.to as ExpressionNode;
   const stepExpr = (command.args.step as ExpressionNode | undefined) ?? { kind: "number", value: 1, raw: "1" };
-  const body = command.args.do as NestedBlockNode;
+  const body = command.blocks.do as NestedBlockNode;
 
   const start = evaluateLangExpression(fromExpr, environment);
   const end = evaluateLangExpression(toExpr, environment);
@@ -36,7 +36,7 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
       iterations += 1;
 
       const bodyOutputs = withLocalVariables(environment, { [iterator.name]: value }, () =>
-        executeBodyStatements(body.content, context, environment, body.scope)
+        executeBodyStatements(body.content, context, environment, scope)
       );
       outputs.push(...bodyOutputs);
     }
@@ -48,7 +48,7 @@ export const executeForCommand: ShellCommandExecutor = (command, context, enviro
       iterations += 1;
 
       const bodyOutputs = withLocalVariables(environment, { [iterator.name]: value }, () =>
-        executeBodyStatements(body.content, context, environment, body.scope)
+        executeBodyStatements(body.content, context, environment, scope)
       );
       outputs.push(...bodyOutputs);
     }

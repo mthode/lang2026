@@ -12,26 +12,31 @@ The scanner tokenizes input first. The parser then builds structured nodes for s
 Use these entry points depending on the layer you are working in:
 
 - `createParser(config)` parses normal shell lines and scripts.
-- `parseCommandDeclaration(tokens)` parses a `cmd` declaration into a `CommandDeclaration`.
+- `parseStatementDeclaration(tokens)` parses a `cmd` declaration into a `StatementDeclaration`.
 - `validateDeclaration(decl, existingCommandNames)` enforces declaration-level rules.
-- `parseInvocation(tokens, decl)` parses one invocation against a specific declaration.
+- `parseInvocation(tokens, decl, options?)` parses one invocation against a specific declaration.
 - `validateInvocation(result, decl)` enforces required-clause and clause-cardinality rules after parsing.
 
 Named-language resolution helpers are also exported for the shell runtime:
 
 - `resolveNamedOperatorSet(registry, name)`
-- `resolveNamedCommandSet(registry, name)`
 - `resolveNamedStatementSet(registry, name)`
+- `resolveNamedLanguage(registry, name)`
 
 ## Command Declarations
 
 User-defined commands are declared with `cmd`:
 
 ```text
-cmd [--evaluate operatorSet]? [qualifier? ...] commandName argDecls { body } [:: statementSet]
+cmd [--evaluate operatorSet]? [qualifier? ...] commandName argDecls [blockSection ...]
 ```
 
-The body is stored as a nested block and executed later by the shell runtime.
+Block sections may be:
+
+- an implicit compatibility body: `{ ... } [:: language]`
+- a named block: `blockName { ... } [:: language]`
+
+The parser can represent zero, one, or many declared blocks. The shell currently narrows executable `cmd` declarations to exactly one required block named `body`.
 
 ### Terminology
 
@@ -40,6 +45,7 @@ The body is stored as a nested block and executed later by the shell runtime.
 - `_?` and `name?` make that positional argument optional.
 - `...` means a vararg slot for zero or more unnamed positional arguments.
 - A keyed clause is a keyword-led nested argument group such as `(to _)` or `[mode name]*`.
+- `{}` inside a keyed clause declares that the clause consumes a nested block at invocation time.
 - A qualifier is a boolean flag declared before the command name, such as `verbose?`.
 
 ### Grammar
@@ -47,12 +53,15 @@ The body is stored as a nested block and executed later by the shell runtime.
 The declaration grammar is:
 
 ```ebnf
-CommandDefn      ::= "cmd" ArgExprSpec? QualifierDecl* CommandName ArgDecls Body BodyStmtSpec?
+CommandDefn      ::= "cmd" ArgExprSpec? QualifierDecl* CommandName ArgDecls BlockSection*
 ArgExprSpec      ::= "--" "evaluate" OperatorSetName
+BlockSection     ::= Body BodyStmtSpec?
+                   | BlockName Body BodyStmtSpec?
 Body             ::= "{" CommandText "}"
-BodyStmtSpec     ::= "::" StatementSetName
+BodyStmtSpec     ::= "::" LanguageName
 
-ArgDecls         ::= ArgDecl* OptionalArgDecl* KeyedDecl* ("..." NamedArgDecl*)?
+ArgDecls         ::= ArgDecl* OptionalArgDecl* KeyedDecl* ("..." NamedArgDecl*)? BlockMarker?
+BlockMarker      ::= "{}"
 
 ArgDecl          ::= "_"
                    | NamedArgDecl
@@ -71,7 +80,7 @@ QualifierDecl    ::= Keyword "?"
 Additional declaration metadata captured by the parser:
 
 - `argumentOperatorSetName` stores the optional operator set named by `--evaluate`.
-- `bodyStatementSetName` stores the optional statement set named by postfix `:: Name`.
+- `blocks` stores declared statement blocks. An unnamed trailing body desugars to a block named `body`.
 
 ### Declaration Forms
 
@@ -83,6 +92,8 @@ Additional declaration metadata captured by the parser:
 - Required keyed clause, repeatable: `(keyword argDecls)+`
 - Optional keyed clause: `[keyword argDecls]`
 - Optional keyed clause, repeatable: `[keyword argDecls]*`
+- Required keyed block clause: `(keyword {})`
+- Optional keyed block clause: `[keyword {}]`
 - Vararg unnamed positional: `...`
 - Vararg with trailing required named args: `... destination`
 
@@ -122,7 +133,18 @@ Examples:
 cmd send _ (to _) { echo send $1 to $to }
 cmd add (item _)+ { echo $item }
 cmd config [mode name]* { echo configured }
+cmd if condition (then {}) [else {}]
+cmd match [case value {}]*
 ```
+
+Keyed block clauses bind nested blocks from invocation source instead of from declaration source:
+
+```text
+if ready then { echo yes } else { echo no }
+match case 1 + 2 { echo one } case 3 + 4 { echo two }
+```
+
+When a keyed block clause also declares ordinary arguments, the following `{ ... }` block is treated as the block payload boundary and is not consumed as part of the final argument expression.
 
 ### Varargs And Trailing Named Arguments
 
@@ -145,6 +167,7 @@ The declaration parser builds the structure. `validateDeclaration` then enforces
 - Duplicate keyed clause keywords anywhere in one command declaration are invalid.
 - Qualifier keywords may not collide with existing command names.
 - Qualifier keywords may not collide with keyed clause keywords in the same declaration.
+- Invocation-time block clause names may not collide with declared statement block names.
 - Nested keyed clauses cannot contain `...` when an ancestor clause has trailing required named arguments after its own `...`.
 
 The scanner emits `...` as a single operator token, but string literals containing `...` remain ordinary strings.
@@ -200,12 +223,15 @@ The vararg in one clause does not consume a child clause keyword. A recognized c
 - Required keyed clauses appear at least once.
 - Single-occurrence clauses are not repeated.
 - Nested required clauses are also satisfied.
+- Bound block sections are declared by either statement blocks or invocation-time block clauses.
+- Block-bearing clause occurrences have exactly one bound nested block each.
+- Declared statement block cardinality is respected.
 
 This separation keeps the parsing logic simple while still enforcing declaration semantics.
 
 ## Parsed Data Structures
 
-The declaration parser produces `CommandDeclaration`:
+The declaration parser produces `StatementDeclaration`:
 
 ```ts
 interface PositionalArgDecl {
@@ -216,6 +242,10 @@ interface PositionalArgDecl {
 
 interface VarargDecl {
 	trailingNamedArgs: string[];
+}
+
+interface BlockMarkerDecl {
+	kind: "block";
 }
 
 interface KeyedClauseDecl {
@@ -233,20 +263,20 @@ interface ArgDeclGroup {
 	positional: PositionalArgDecl[];
 	keyedClauses: KeyedClauseDecl[];
 	vararg?: VarargDecl;
+	block?: BlockMarkerDecl;
 }
 
-interface CommandDeclaration {
+interface StatementDeclaration {
 	name: string;
 	argumentOperatorSetName?: string;
 	qualifiers: QualifierDecl[];
 	argDecls: ArgDeclGroup;
-	body: NestedBlockNode;
-	bodyStatementSetName?: string;
+	blocks: StatementBlock[];
 	globalKeywords: Set<string>;
 }
 ```
 
-Invocation parsing returns `ParsedCommand`:
+Invocation parsing returns `ParsedStatement`:
 
 ```ts
 interface ParsedArguments {
@@ -256,14 +286,25 @@ interface ParsedArguments {
 	clauses: Record<string, ParsedArguments[]>;
 }
 
-interface ParsedCommand {
-	commandName: string;
+interface ParsedStatement {
+	statementName: string;
 	qualifiers: Record<string, boolean>;
 	arguments: ParsedArguments;
+	blocks: Record<string, NestedBlockNode[]>;
 }
 ```
 
 `ArgumentValue` reuses parser value types: `ExpressionNode | string | NestedBlockNode`.
+
+`parseInvocation` accepts optional parser-owned invocation settings:
+
+```ts
+interface InvocationParseOptions {
+	expressionConfig?: ExpressionParserConfig;
+}
+```
+
+Use `expressionConfig` when a declaration's arguments should be parsed with a selected operator set. Invocation-bound block sections such as `(then {})` are parsed structurally and do not carry execution-time language metadata.
 
 ## Examples
 
@@ -273,8 +314,9 @@ cmd greet name { echo hello $name }
 cmd cp _ ... destination { echo copy $args to $destination }
 cmd verbose? cp _ [mode name]* ... destination { echo copy }
 cmd send _ (to _) { echo send $1 to $to }
+cmd if condition (then {}) [else {}]
 cmd move (from _ (within _)) (to _) { echo move }
-cmd --evaluate math_ops calc value { eval $value } :: eval_stmt
+cmd --evaluate math_ops calc value { eval $value } :: eval_lang
 ```
 
 ## Runtime Flow
@@ -282,18 +324,11 @@ cmd --evaluate math_ops calc value { eval $value } :: eval_stmt
 The normal flow for user-defined commands is:
 
 1. Scan source.
-2. Parse the declaration with `parseCommandDeclaration(...)`.
+2. Parse the declaration with `parseStatementDeclaration(...)`.
 3. Validate it with `validateDeclaration(...)`.
-4. Store the resulting `CommandDeclaration`.
+4. Store the resulting `StatementDeclaration`.
 5. Parse an invocation with `parseInvocation(...)`.
 6. Validate the invocation with `validateInvocation(...)`.
 7. Map parsed values into the execution environment and run the stored body.
 
-Built-in commands continue to use their existing command handlers, but declaration-based invocation translation is already used for some built-ins during migration.
-
-
-
-
-
-
-
+Built-in shell commands use the same `NamedStatementNode` shape as other parsed statements. Shell-specific command handlers decide how to execute that parser-generic structure.

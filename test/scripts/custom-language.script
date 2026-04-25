@@ -1,15 +1,15 @@
-opset math_ops {
+operators math_ops {
   infix + precedence 7 left
 }
 
-cmdset eval_only {
+statements eval_only {
   eval
 }
 
-stmtset eval_stmt commands eval_only operators shell_ops
+language eval_lang statements eval_only operators shell_ops
 
 cmd --evaluate math_ops calc value {
   eval $value
-} :: eval_stmt
+} :: eval_lang
 
 calc 1 + 2

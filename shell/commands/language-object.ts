@@ -1,58 +1,58 @@
 import {
-  cloneCommandSet,
   cloneLanguage,
   cloneOperatorSet,
+  cloneStatementSet,
   compactTokens,
   createLanguage,
   extractNestedBlock,
-  resolveNamedCommandSet,
   resolveNamedOperatorSet,
-  type CommandSetDefinition,
+  resolveNamedStatementSet,
   type InfixOperatorDefinition,
   type OperatorSetDefinition,
-  type PrefixOperatorDefinition
+  type PrefixOperatorDefinition,
+  type StatementSetDefinition
 } from "../../parser/index.js";
 import { scan, type Token } from "../../scanner/index.js";
 import {
-  registerCommandSet,
+  registerLanguage,
   registerOperatorSet,
   registerStatementSet,
-  shellCommandDefinitions
+  shellStatementDefinitions
 } from "../custom-language.js";
 import type { ShellCommandExecutor } from "./types.js";
 
-export const executeOpsetCommand: ShellCommandExecutor = (command, _context, environment) => {
-  const declarationSource = readDeclarationSource(command.args.declaration, "'opset' requires: opset NAME { DEFINITIONS }");
+export const executeOperatorsCommand: ShellCommandExecutor = (command, _context, environment) => {
+  const declarationSource = readDeclarationSource(command.args.declaration, "'operators' requires: operators NAME { DEFINITIONS }");
   const { name, definition } = parseOperatorSetDeclaration(declarationSource);
 
   registerOperatorSet(environment.operatorSets, name, cloneOperatorSet(definition));
   return undefined;
 };
 
-export const executeCmdsetCommand: ShellCommandExecutor = (command, _context, environment) => {
-  const declarationSource = readDeclarationSource(command.args.declaration, "'cmdset' requires: cmdset NAME { COMMANDS }");
-  const { name, definition } = parseCommandSetDeclaration(declarationSource);
+export const executeStatementsCommand: ShellCommandExecutor = (command, _context, environment) => {
+  const declarationSource = readDeclarationSource(command.args.declaration, "'statements' requires: statements NAME { STATEMENTS }");
+  const { name, definition } = parseStatementSetDeclaration(declarationSource);
 
-  registerCommandSet(environment.commandSets, name, cloneCommandSet(definition));
+  registerStatementSet(environment.statementSets, name, cloneStatementSet(definition));
   return undefined;
 };
 
-export const executeStmtsetCommand: ShellCommandExecutor = (command, _context, environment) => {
+export const executeLanguageCommand: ShellCommandExecutor = (command, _context, environment) => {
   const declarationSource = readDeclarationSource(
     command.args.declaration,
-    "'stmtset' requires: stmtset NAME commands COMMAND_SET operators OPERATOR_SET"
+    "'language' requires: language NAME statements STATEMENT_SET operators OPERATOR_SET"
   );
-  const { name, commandSetName, operatorSetName } = parseStatementSetDeclaration(declarationSource);
+  const { name, statementsName, operatorSetName } = parseLanguageDeclaration(declarationSource);
 
-  const commandSet = resolveNamedCommandSet(environment.commandSets, commandSetName);
+  const statementSet = resolveNamedStatementSet(environment.statementSets, statementsName);
   const operatorSet = resolveNamedOperatorSet(environment.operatorSets, operatorSetName);
 
   const definition = createLanguage({
-    commandSet,
+    statementSet,
     operatorSet
   });
 
-  registerStatementSet(environment.statementSets, name, cloneLanguage(definition));
+  registerLanguage(environment.languages, name, cloneLanguage(definition));
   return undefined;
 };
 
@@ -137,10 +137,10 @@ function parseOperatorSetDeclaration(source: string): { name: string; definition
   };
 }
 
-function parseCommandSetDeclaration(source: string): { name: string; definition: CommandSetDefinition } {
-  const { name, body } = parseNamedBlockDeclaration(source, "command set");
+function parseStatementSetDeclaration(source: string): { name: string; definition: StatementSetDefinition } {
+  const { name, body } = parseNamedBlockDeclaration(source, "statement set");
   const tokens = compactTokens(scan(body));
-  const commands: CommandSetDefinition["commands"] = {};
+  const statements: StatementSetDefinition["statements"] = {};
   const unsupportedConstructs = new Set(["import", "extend", "compose", "include", "use"]);
 
   for (let index = 0; index < tokens.length; index += 1) {
@@ -150,77 +150,77 @@ function parseCommandSetDeclaration(source: string): { name: string; definition:
     }
 
     if (token.type !== "identifier") {
-      throw new Error(`Expected command name in command set body, got '${token.value}'`);
+      throw new Error(`Expected statement name in statement set body, got '${token.value}'`);
     }
 
     if (unsupportedConstructs.has(token.value)) {
-      throw new Error(`Unsupported command set construct '${token.value}'`);
+      throw new Error(`Unsupported statement set construct '${token.value}'`);
     }
 
-    const definition = shellCommandDefinitions[token.value];
+    const definition = shellStatementDefinitions[token.value];
     if (!definition) {
-      throw new Error(`Unknown command '${token.value}'`);
+      throw new Error(`Unknown statement '${token.value}'`);
     }
 
-    if (commands[token.value]) {
-      throw new Error(`Duplicate command '${token.value}' in command set body`);
+    if (statements[token.value]) {
+      throw new Error(`Duplicate statement '${token.value}' in statement set body`);
     }
 
-    commands[token.value] = definition;
+    statements[token.value] = definition;
   }
 
   return {
     name,
     definition: {
       name,
-      commands,
-      strictCommands: true
+      statements,
+      strictStatements: true
     }
   };
 }
 
-function parseStatementSetDeclaration(source: string): {
+function parseLanguageDeclaration(source: string): {
   name: string;
-  commandSetName: string;
+  statementsName: string;
   operatorSetName: string;
 } {
   const tokens = compactTokens(scan(source));
   const [
     nameToken,
-    commandsKeyword,
-    commandSetToken,
+    statementsKeyword,
+    statementSetToken,
     operatorsKeyword,
     operatorSetToken,
     extraToken
   ] = tokens;
 
   if (!nameToken || nameToken.type !== "identifier") {
-    throw new Error("Statement set declaration must start with a name");
+    throw new Error("Language declaration must start with a name");
   }
 
-  if (!commandsKeyword || commandsKeyword.type !== "identifier" || commandsKeyword.value !== "commands") {
-    throw new Error("Statement set declaration must include 'commands COMMAND_SET'");
+  if (!statementsKeyword || statementsKeyword.type !== "identifier" || statementsKeyword.value !== "statements") {
+    throw new Error("Language declaration must include 'statements STATEMENT_SET'");
   }
 
-  if (!commandSetToken || commandSetToken.type !== "identifier") {
-    throw new Error("Statement set declaration must name a command set");
+  if (!statementSetToken || statementSetToken.type !== "identifier") {
+    throw new Error("Language declaration must name a statement set");
   }
 
   if (!operatorsKeyword || operatorsKeyword.type !== "identifier" || operatorsKeyword.value !== "operators") {
-    throw new Error("Statement set declaration must include 'operators OPERATOR_SET'");
+    throw new Error("Language declaration must include 'operators OPERATOR_SET'");
   }
 
   if (!operatorSetToken || operatorSetToken.type !== "identifier") {
-    throw new Error("Statement set declaration must name an operator set");
+    throw new Error("Language declaration must name an operator set");
   }
 
   if (extraToken) {
-    throw new Error(`Unexpected token '${extraToken.value}' after statement set declaration`);
+    throw new Error(`Unexpected token '${extraToken.value}' after language declaration`);
   }
 
   return {
     name: nameToken.value,
-    commandSetName: commandSetToken.value,
+    statementsName: statementSetToken.value,
     operatorSetName: operatorSetToken.value
   };
 }
@@ -238,44 +238,30 @@ function parseNamedBlockDeclaration(source: string, kind: string): { name: strin
 }
 
 function parseIdentifier(source: string, message: string): string {
-  const value = source.trim();
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-    throw new Error(`${message} '${value}'`);
+  const tokens = compactTokens(scan(source));
+  if (tokens.length !== 1 || tokens[0]?.type !== "identifier") {
+    throw new Error(message);
   }
-
-  return value;
+  return tokens[0].value;
 }
 
-function readDeclarationSource(value: unknown, usage: string): string {
-  const source = readRawVararg(value).join(" ").trim();
+function readDeclarationSource(value: unknown, emptyMessage: string): string {
+  const parts = Array.isArray(value) ? value : [value];
+  const source = parts.filter((part): part is string => typeof part === "string").join(" ").trim();
   if (source.length === 0) {
-    throw new Error(usage);
+    throw new Error(emptyMessage);
   }
-
   return source;
 }
 
-function readRawVararg(value: unknown): string[] {
-  if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    return [value];
-  }
-
-  return [];
-}
-
 function isSeparator(token: Token): boolean {
-  return token.type === "delimiter" && (token.value === ";" || token.value === ",");
+  return token.value === "," || token.value === ";";
 }
 
-function skipSeparators(tokens: Token[], from: number): number {
-  let index = from;
-  while (index < tokens.length && tokens[index] && isSeparator(tokens[index]!)) {
-    index += 1;
+function skipSeparators(tokens: Token[], index: number): number {
+  let cursor = index;
+  while (cursor < tokens.length && isSeparator(tokens[cursor]!)) {
+    cursor += 1;
   }
-
-  return index;
+  return cursor;
 }

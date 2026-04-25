@@ -1,11 +1,11 @@
 import type { Token } from "../scanner/index.js";
-import type { ArgumentValue } from "./command.js";
+import { extractNestedBlock, type ArgumentValue, type NestedBlockNode } from "./statement.js";
 import {
   isIgnorable,
   parseExpressionFromTokens,
   type ExpressionParserConfig
 } from "./expression.js";
-import type { ArgDeclGroup, CommandDeclaration, ParsedArguments, ParsedCommand } from "./declaration.js";
+import type { ArgDeclGroup, ClauseBlockDecl, ParsedArguments, ParsedStatement, StatementDeclaration } from "./declaration.js";
 
 interface ClauseParseState {
   parsed: ParsedArguments;
@@ -16,6 +16,12 @@ interface ClauseParseState {
 interface InvocationSegment {
   tokens: Token[];
   value: string;
+}
+
+type ParsedBlocks = Record<string, NestedBlockNode[]>;
+
+export interface InvocationParseOptions {
+  expressionConfig?: ExpressionParserConfig;
 }
 
 function splitInvocationSegments(tokens: Token[]): InvocationSegment[] {
@@ -60,6 +66,10 @@ function segmentIdentifierValue(segment: InvocationSegment): string | undefined 
 function isKeywordCandidate(segment: InvocationSegment, keywords: Set<string>): boolean {
   const identifier = segmentIdentifierValue(segment);
   return identifier !== undefined && keywords.has(identifier);
+}
+
+function isBlockSegment(segment: InvocationSegment): boolean {
+  return segment.tokens[0]?.value === "{";
 }
 
 function findChildClause(group: ArgDeclGroup, keyword: string) {
@@ -107,10 +117,15 @@ function findChildClauseBoundaryIndex(
   group: ArgDeclGroup,
   segments: InvocationSegment[],
   fromIndex: number,
-  globalKeywords: Set<string>
+  globalKeywords: Set<string>,
+  expectsBlock = false
 ): number {
   for (let index = fromIndex; index < segments.length; index += 1) {
     const segment = segments[index]!;
+    if (expectsBlock && isBlockSegment(segment)) {
+      return index;
+    }
+
     if (!isKeywordCandidate(segment, globalKeywords)) {
       continue;
     }
@@ -150,6 +165,10 @@ function countRequiredValuesAfterCurrent(group: ArgDeclGroup, state: ClauseParse
   return count;
 }
 
+function canConsumeValue(group: ArgDeclGroup, state: ClauseParseState): boolean {
+  return state.positionalIndex < group.positional.length || group.vararg !== undefined;
+}
+
 function tryParseExpressionValue(
   tokens: Token[],
   expressionConfig: ExpressionParserConfig
@@ -167,12 +186,13 @@ function parseExpressionValueForClause(
   segments: InvocationSegment[],
   startIndex: number,
   globalKeywords: Set<string>,
-  expressionConfig: ExpressionParserConfig
+  expressionConfig: ExpressionParserConfig,
+  expectsBlock = false
 ): { value: ArgumentValue; nextIndex: number } {
-  const valueRegionEnd = findChildClauseBoundaryIndex(group, segments, startIndex, globalKeywords);
+  const valueRegionEnd = findChildClauseBoundaryIndex(group, segments, startIndex, globalKeywords, expectsBlock);
   const requiredAfterCurrent = countRequiredValuesAfterCurrent(group, state);
   const canLeaveAdditionalValues = hasAdditionalValueSlots(group, state);
-  const minEnd = startIndex + 1;
+  const minEnd = canLeaveAdditionalValues ? startIndex + 1 : valueRegionEnd;
   const maxEnd = canLeaveAdditionalValues
     ? Math.max(minEnd, valueRegionEnd - requiredAfterCurrent)
     : valueRegionEnd;
@@ -226,15 +246,53 @@ function finalizeClause(group: ArgDeclGroup, state: ClauseParseState): void {
   }
 }
 
+function parseNestedBlockSegment(
+  segment: InvocationSegment | undefined,
+  clauseName: string
+): NestedBlockNode {
+  if (!segment || !isBlockSegment(segment)) {
+    throw new Error(`Expected nested block after clause '${clauseName}'`);
+  }
+
+  const block = extractNestedBlock(segment.value);
+  const trailing = segment.value.slice(block.closeIndex + 1).trim();
+  if (trailing.length > 0) {
+    throw new Error(`Unexpected content after nested block for clause '${clauseName}'`);
+  }
+
+  return {
+    kind: "nested-block",
+    content: block.content
+  };
+}
+
+function addParsedBlock(blocks: ParsedBlocks, name: string, block: NestedBlockNode): void {
+  if (!blocks[name]) {
+    blocks[name] = [];
+  }
+  blocks[name]!.push(block);
+}
+
+function mergeParsedBlocks(target: ParsedBlocks, source: ParsedBlocks): void {
+  for (const [name, blocks] of Object.entries(source)) {
+    if (!target[name]) {
+      target[name] = [];
+    }
+    target[name]!.push(...blocks);
+  }
+}
+
 function parseClause(
   group: ArgDeclGroup,
   clauseName: string,
   segments: InvocationSegment[],
   startIndex: number,
   globalKeywords: Set<string>,
-  expressionConfig?: ExpressionParserConfig
-): { parsed: ParsedArguments; nextIndex: number } {
+  expressionConfig?: ExpressionParserConfig,
+  blockDecl?: ClauseBlockDecl
+): { parsed: ParsedArguments; blocks: ParsedBlocks; nextIndex: number } {
   const state = createClauseState(clauseName);
+  const blocks: ParsedBlocks = {};
   let index = startIndex;
 
   while (index < segments.length) {
@@ -247,17 +305,44 @@ function parseClause(
         break;
       }
 
-      const child = parseClause(childDecl.argDecls, childDecl.keyword, segments, index + 1, globalKeywords, expressionConfig);
+      const child = parseClause(
+        childDecl.argDecls,
+        childDecl.keyword,
+        segments,
+        index + 1,
+        globalKeywords,
+        expressionConfig,
+        childDecl.block
+      );
       if (!state.parsed.clauses[childDecl.keyword]) {
         state.parsed.clauses[childDecl.keyword] = [];
       }
       state.parsed.clauses[childDecl.keyword]!.push(child.parsed);
-      index = child.nextIndex;
+      mergeParsedBlocks(blocks, child.blocks);
+
+      if (childDecl.block) {
+        addParsedBlock(
+          blocks,
+          childDecl.keyword,
+          parseNestedBlockSegment(segments[child.nextIndex], childDecl.keyword)
+        );
+        index = child.nextIndex + 1;
+      } else {
+        index = child.nextIndex;
+      }
       continue;
     }
 
+    if (!canConsumeValue(group, state)) {
+      break;
+    }
+
+    if (blockDecl && isBlockSegment(segment)) {
+      break;
+    }
+
     const valueResult = expressionConfig
-      ? parseExpressionValueForClause(group, state, segments, index, globalKeywords, expressionConfig)
+      ? parseExpressionValueForClause(group, state, segments, index, globalKeywords, expressionConfig, blockDecl !== undefined)
       : { value: segment.value, nextIndex: index + 1 };
 
     const consumed = assignPositionalValue(group, state, valueResult.value);
@@ -268,14 +353,15 @@ function parseClause(
   }
 
   finalizeClause(group, state);
-  return { parsed: state.parsed, nextIndex: index };
+  return { parsed: state.parsed, blocks, nextIndex: index };
 }
 
 export function parseInvocation(
   tokens: Token[],
-  decl: CommandDeclaration,
-  expressionConfig?: ExpressionParserConfig
-): ParsedCommand {
+  decl: StatementDeclaration,
+  options: InvocationParseOptions = {}
+): ParsedStatement {
+  const { expressionConfig } = options;
   const segments = splitInvocationSegments(tokens);
   const qualifiers = Object.fromEntries(decl.qualifiers.map((q) => [q.keyword, false])) as Record<string, boolean>;
   const qualifierSet = new Set(decl.qualifiers.map((q) => q.keyword));
@@ -290,13 +376,13 @@ export function parseInvocation(
     index += 1;
   }
 
-  const commandNameSegment = segments[index];
-  const commandName = commandNameSegment ? segmentIdentifierValue(commandNameSegment) : undefined;
-  if (!commandName) {
-    throw new Error("Expected command name in invocation");
+  const statementNameSegment = segments[index];
+  const statementName = statementNameSegment ? segmentIdentifierValue(statementNameSegment) : undefined;
+  if (!statementName) {
+    throw new Error("Expected statement name in invocation");
   }
-  if (commandName !== decl.name) {
-    throw new Error(`Expected command '${decl.name}' but found '${commandName}'`);
+  if (statementName !== decl.name) {
+    throw new Error(`Expected statement '${decl.name}' but found '${statementName}'`);
   }
   index += 1;
 
@@ -312,13 +398,25 @@ export function parseInvocation(
   }
 
   return {
-    commandName: decl.name,
+    statementName: decl.name,
     qualifiers,
-    arguments: root.parsed
+    arguments: root.parsed,
+    blocks: root.blocks
   };
 }
 
-export function validateInvocation(result: ParsedCommand, decl: CommandDeclaration): void {
+export function validateInvocation(result: ParsedStatement, decl: StatementDeclaration): void {
+  const allowedBlockNames = new Set<string>();
+
+  function collectInvocationBlockNames(group: ArgDeclGroup): void {
+    for (const clause of group.keyedClauses) {
+      if (clause.block) {
+        allowedBlockNames.add(clause.keyword);
+      }
+      collectInvocationBlockNames(clause.argDecls);
+    }
+  }
+
   function validateParsedArguments(group: ArgDeclGroup, parsed: ParsedArguments): void {
     // Required positional declarations must be present.
     const requiredNamed = group.positional.filter((p) => !p.optional && p.kind === "named" && p.name).map((p) => p.name as string);
@@ -349,15 +447,33 @@ export function validateInvocation(result: ParsedCommand, decl: CommandDeclarati
         throw new Error(`Clause '${clause.keyword}' must appear at least once in clause '${parsed.clauseName}'`);
       }
 
+      if (clause.block) {
+        const blockCount = result.blocks[clause.keyword]?.length ?? 0;
+        if (blockCount !== occurrences.length) {
+          throw new Error(`Block clause '${clause.keyword}' expected ${occurrences.length} block(s) but found ${blockCount}`);
+        }
+      }
+
       for (const child of occurrences) {
         validateParsedArguments(clause.argDecls, child);
       }
     }
   }
 
-  if (result.commandName !== decl.name) {
-    throw new Error(`Expected command '${decl.name}' but found '${result.commandName}'`);
+  function validateParsedBlocks(): void {
+    collectInvocationBlockNames(decl.argDecls);
+
+    for (const name of Object.keys(result.blocks)) {
+      if (!allowedBlockNames.has(name)) {
+        throw new Error(`Unexpected block section '${name}' in statement '${result.statementName}'`);
+      }
+    }
+  }
+
+  if (result.statementName !== decl.name) {
+    throw new Error(`Expected statement '${decl.name}' but found '${result.statementName}'`);
   }
 
   validateParsedArguments(decl.argDecls, result.arguments);
+  validateParsedBlocks();
 }

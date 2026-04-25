@@ -6,9 +6,9 @@ import type { ShellCommandExecutor } from "./types.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export const executeWhileCommand: ShellCommandExecutor = (command, context, environment) => {
+export const executeWhileCommand: ShellCommandExecutor = (command, context, environment, scope) => {
   const condition = command.args.condition as ExpressionNode;
-  const body = command.args.do as NestedBlockNode;
+  const body = command.blocks.do as NestedBlockNode;
 
   const outputs: string[] = [];
   let loop = 0;
@@ -24,7 +24,7 @@ export const executeWhileCommand: ShellCommandExecutor = (command, context, envi
     }
 
     const bodyOutputs = withLocalVariables(environment, { loop }, () =>
-      executeBodyStatements(body.content, context, environment, body.scope)
+      executeBodyStatements(body.content, context, environment, scope)
     );
     outputs.push(...bodyOutputs);
 
