@@ -1,13 +1,11 @@
 import {
-  extractNestedBlock,
-  parseStatementDeclaration,
-  parseInvocation,
   resolveNamedOperatorSet,
   resolveNamedLanguage,
   toExpressionParserConfig,
-  validateDeclaration,
-  validateInvocation
+  extractNestedBlock
 } from "../../parser/index.js";
+import { parseStatementDeclaration, validateDeclaration } from "../declaration.js";
+import { parseInvocation, validateInvocation } from "../invocation.js";
 import { renderTemplateVariables, stringifyExpression } from "../../lang/expression.js";
 import { isIgnorable } from "../../parser/expression.js";
 import { scan, type Token } from "../../scanner/index.js";

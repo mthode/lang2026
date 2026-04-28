@@ -136,27 +136,5 @@ function cloneStatementDefinitions(
 }
 
 function cloneStatementDefinition(definition: StatementDefinition): StatementDefinition {
-  return {
-    parts: definition.parts?.map((part) => (
-      part.kind === "argument"
-        ? {
-            ...part,
-            expressionOperators: part.expressionOperators
-              ? {
-                  prefixOperators: part.expressionOperators.prefixOperators
-                    ? { ...part.expressionOperators.prefixOperators }
-                    : undefined,
-                  infixOperators: part.expressionOperators.infixOperators
-                    ? { ...part.expressionOperators.infixOperators }
-                    : undefined
-                }
-              : undefined
-          }
-        : { ...part }
-    )),
-    allowExtraArguments: definition.allowExtraArguments,
-    argumentKind: definition.argumentKind,
-    parseNamedArguments: definition.parseNamedArguments,
-    consumeRestAsSingleArgument: definition.consumeRestAsSingleArgument
-  };
+  return definition;
 }

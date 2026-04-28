@@ -22,12 +22,21 @@ export interface NestedBlockNode {
 export type ArgumentValue = ExpressionNode | string | NestedBlockNode;
 export type StatementArguments = Record<string, ArgumentValue | ArgumentValue[]>;
 export type StatementBlocks = Record<string, NestedBlockNode | NestedBlockNode[]>;
+export type StatementClauses = Record<string, ParsedStatementClause[]>;
+
+export interface ParsedStatementClause {
+  args: StatementArguments;
+  blocks: StatementBlocks;
+  clauses: StatementClauses;
+}
 
 export interface NamedStatementNode {
   kind: "statement";
   name: string;
   args: StatementArguments;
   blocks: StatementBlocks;
+  qualifiers?: Record<string, boolean>;
+  clauses?: StatementClauses;
   raw: string;
 }
 
@@ -44,10 +53,16 @@ export type StatementArgumentKind = "expression" | "raw";
 
 export interface StatementDefinition {
   parts?: StatementPartDefinition[];
+  qualifiers?: StatementQualifierDefinition[];
   allowExtraArguments?: boolean;
   argumentKind?: StatementArgumentKind;
   parseNamedArguments?: boolean;
   consumeRestAsSingleArgument?: boolean;
+  argumentExpressionOperators?: ExpressionOperatorOverrides;
+}
+
+export interface StatementQualifierDefinition {
+  keyword: string;
 }
 
 export interface StatementArgumentDefinition {
@@ -57,6 +72,7 @@ export interface StatementArgumentDefinition {
   positional?: boolean;
   optional?: boolean;
   vararg?: boolean;
+  trailingNamedArguments?: string[];
   expressionOperators?: ExpressionOperatorOverrides;
 }
 
@@ -66,9 +82,23 @@ export interface StatementBlockDefinition {
   positional?: boolean;
   optional?: boolean;
   vararg?: boolean;
+  languageName?: string;
 }
 
-export type StatementPartDefinition = StatementArgumentDefinition | StatementBlockDefinition;
+export interface StatementClauseBlockDefinition {
+  languageName?: string;
+}
+
+export interface StatementClauseDefinition {
+  kind: "clause";
+  name: string;
+  optional?: boolean;
+  vararg?: boolean;
+  parts?: StatementPartDefinition[];
+  block?: StatementClauseBlockDefinition;
+}
+
+export type StatementPartDefinition = StatementArgumentDefinition | StatementBlockDefinition | StatementClauseDefinition;
 
 export class PartInfo {
   readonly kind: StatementPartDefinition["kind"];
@@ -82,7 +112,7 @@ export class PartInfo {
   constructor(definition: StatementPartDefinition) {
     this.kind = definition.kind;
     this.name = definition.name;
-    this.positional = definition.positional ?? false;
+    this.positional = definition.kind === "clause" ? false : definition.positional ?? false;
     this.optional = definition.optional ?? false;
     this.vararg = definition.vararg ?? false;
     this.valueKind = definition.kind === "argument" ? definition.valueKind : undefined;
@@ -96,7 +126,7 @@ export class PartInfo {
   static validateOrdering(definitions: PartInfo[]): void {
     for (let index = 0; index < definitions.length; index += 1) {
       const definition = definitions[index]!;
-      if (definition.vararg && (!definition.positional || index !== definitions.length - 1)) {
+      if (definition.kind !== "clause" && definition.vararg && (!definition.positional || index !== definitions.length - 1)) {
         throw new Error(`Vararg part '${definition.name}' must be the last positional part`);
       }
     }
@@ -151,10 +181,12 @@ interface ResolvedParserScope {
 function normalizeStatementDefinition(definition?: StatementDefinition): Required<StatementDefinition> {
   return {
     parts: definition?.parts ?? [],
+    qualifiers: definition?.qualifiers ?? [],
     allowExtraArguments: definition?.allowExtraArguments ?? false,
     argumentKind: definition?.argumentKind ?? "expression",
     parseNamedArguments: definition?.parseNamedArguments ?? true,
-    consumeRestAsSingleArgument: definition?.consumeRestAsSingleArgument ?? false
+    consumeRestAsSingleArgument: definition?.consumeRestAsSingleArgument ?? false,
+    argumentExpressionOperators: definition?.argumentExpressionOperators ?? {}
   };
 }
 
@@ -203,7 +235,11 @@ function parseArgumentValue(
     throw new Error("Expected expression");
   }
 
-  const effectiveExpressionConfig = applyExpressionOperatorOverrides(expressionConfig, partDefinition?.expressionOperators);
+  const statementExpressionConfig = applyExpressionOperatorOverrides(
+    expressionConfig,
+    statementDefinition.argumentExpressionOperators
+  );
+  const effectiveExpressionConfig = applyExpressionOperatorOverrides(statementExpressionConfig, partDefinition?.expressionOperators);
 
   if (
     statementDefinition.parseNamedArguments &&
@@ -497,6 +533,355 @@ function splitArguments(tokens: Token[]): Token[][] {
   return segments;
 }
 
+interface StatementSegment {
+  tokens: Token[];
+  value: string;
+  startTokenIndex: number;
+  endTokenIndex: number;
+}
+
+interface RichParseResult {
+  args: StatementArguments;
+  blocks: StatementBlocks;
+  clauses: StatementClauses;
+  nextIndex: number;
+}
+
+function statementUsesRichParts(definition: Required<StatementDefinition>): boolean {
+  return definition.qualifiers.length > 0 || definition.parts.some((part) =>
+    part.kind === "clause" ||
+    (part.kind === "argument" && (part.trailingNamedArguments?.length ?? 0) > 0)
+  );
+}
+
+function splitStatementSegments(tokens: Token[]): StatementSegment[] {
+  const segments: StatementSegment[] = [];
+  let current: Token[] = [];
+  let currentStart = 0;
+  let depth = 0;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    const wasTopLevel = depth === 0;
+
+    if (token.value === "(" || token.value === "[" || token.value === "{") depth += 1;
+    if (token.value === ")" || token.value === "]" || token.value === "}") depth = Math.max(0, depth - 1);
+
+    if (wasTopLevel && isIgnorable(token)) {
+      if (current.length > 0) {
+        segments.push({
+          tokens: current,
+          value: current.map((entry) => entry.value).join(""),
+          startTokenIndex: currentStart,
+          endTokenIndex: index
+        });
+        current = [];
+      }
+      continue;
+    }
+
+    if (current.length === 0) {
+      currentStart = index;
+    }
+    current.push(token);
+  }
+
+  if (current.length > 0) {
+    segments.push({
+      tokens: current,
+      value: current.map((entry) => entry.value).join(""),
+      startTokenIndex: currentStart,
+      endTokenIndex: tokens.length
+    });
+  }
+
+  return segments;
+}
+
+function segmentIdentifier(segment: StatementSegment | undefined): string | undefined {
+  if (!segment || segment.tokens.length !== 1) {
+    return undefined;
+  }
+
+  const token = segment.tokens[0]!;
+  return token.type === "identifier" ? token.value : undefined;
+}
+
+function isBlockSegment(segment: StatementSegment | undefined): boolean {
+  return segment?.tokens[0]?.value === "{";
+}
+
+function flattenSegments(segments: StatementSegment[], start: number, end: number): Token[] {
+  return segments.slice(start, end).flatMap((segment) => segment.tokens);
+}
+
+function clauseParts(parts: StatementPartDefinition[]): StatementClauseDefinition[] {
+  return parts.filter((part): part is StatementClauseDefinition => part.kind === "clause");
+}
+
+function clauseStopNames(parts: StatementPartDefinition[], inherited: string[]): string[] {
+  return [...new Set([...clauseParts(parts).map((part) => part.name), ...inherited])];
+}
+
+function findSegmentStopIndex(
+  segments: StatementSegment[],
+  fromIndex: number,
+  stopNames: string[],
+  stopAtBlock = false
+): number {
+  for (let index = fromIndex; index < segments.length; index += 1) {
+    if (stopAtBlock && isBlockSegment(segments[index])) {
+      return index;
+    }
+
+    const identifier = segmentIdentifier(segments[index]);
+    if (identifier && stopNames.includes(identifier)) {
+      return index;
+    }
+  }
+
+  return segments.length;
+}
+
+function parseArgumentFromSegments(
+  segments: StatementSegment[],
+  startIndex: number,
+  endIndex: number,
+  expressionConfig: ExpressionParserConfig,
+  statementDefinition: Required<StatementDefinition>,
+  partDefinition: PartInfo,
+  lineOffset: number
+): ArgumentValue {
+  return parseArgumentValue(
+    flattenSegments(segments, startIndex, endIndex),
+    expressionConfig,
+    statementDefinition,
+    lineOffset,
+    partDefinition
+  );
+}
+
+function parseRichValuePart(
+  part: StatementArgumentDefinition | StatementBlockDefinition,
+  segments: StatementSegment[],
+  index: number,
+  stopNames: string[],
+  expressionConfig: ExpressionParserConfig,
+  statementDefinition: Required<StatementDefinition>,
+  lineOffset: number,
+  consumeOneSegment = false,
+  stopAtBlock = false
+): { value: ArgumentValue; nextIndex: number } {
+  const partInfo = new PartInfo(part);
+
+  if (!part.positional) {
+    const keyword = segmentIdentifier(segments[index]);
+    if (keyword !== part.name) {
+      if (part.optional) {
+        return { value: undefined as unknown as ArgumentValue, nextIndex: index };
+      }
+      throw new Error(`Missing required named argument '${part.name}'`);
+    }
+    index += 1;
+  }
+
+  if (part.kind === "block") {
+    const segment = segments[index];
+    if (!isBlockSegment(segment)) {
+      if (part.optional) {
+        return { value: undefined as unknown as ArgumentValue, nextIndex: index };
+      }
+      throw new Error(`Invalid value for argument '${part.name}': Expected nested block starting with '{'`);
+    }
+
+    return {
+      value: parseNestedBlockValue(segment!.tokens, 0).value,
+      nextIndex: index + 1
+    };
+  }
+
+  const valueEnd = findSegmentStopIndex(segments, index, stopNames, stopAtBlock);
+  if (valueEnd <= index) {
+    if (part.optional) {
+      return { value: undefined as unknown as ArgumentValue, nextIndex: index };
+    }
+    throw new Error(`Missing required argument '${part.name}'`);
+  }
+
+  const nextIndex = consumeOneSegment ? index + 1 : valueEnd;
+
+  return {
+    value: parseArgumentFromSegments(
+      segments,
+      index,
+      nextIndex,
+      expressionConfig,
+      statementDefinition,
+      partInfo,
+      lineOffset
+    ),
+    nextIndex
+  };
+}
+
+function addClause(target: StatementClauses, name: string, clause: ParsedStatementClause): void {
+  if (!target[name]) {
+    target[name] = [];
+  }
+  target[name]!.push(clause);
+}
+
+function assignRichPartValue(
+  args: StatementArguments,
+  blocks: StatementBlocks,
+  part: StatementArgumentDefinition | StatementBlockDefinition,
+  value: ArgumentValue | ArgumentValue[] | undefined
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (part.kind === "block") {
+    blocks[part.name] = value as NestedBlockNode | NestedBlockNode[];
+    return;
+  }
+
+  args[part.name] = value;
+}
+
+function parseVarargValues(
+  part: StatementArgumentDefinition,
+  segments: StatementSegment[],
+  index: number,
+  stopNames: string[],
+  expressionConfig: ExpressionParserConfig,
+  statementDefinition: Required<StatementDefinition>,
+  lineOffset: number
+): { argsValue: ArgumentValue[]; trailing: Record<string, ArgumentValue>; nextIndex: number } {
+  const endIndex = findSegmentStopIndex(segments, index, stopNames);
+  const partInfo = new PartInfo(part);
+  const values: ArgumentValue[] = [];
+
+  for (let cursor = index; cursor < endIndex; cursor += 1) {
+    values.push(parseArgumentFromSegments(segments, cursor, cursor + 1, expressionConfig, statementDefinition, partInfo, lineOffset));
+  }
+
+  const trailingNames = part.trailingNamedArguments ?? [];
+  if (values.length < trailingNames.length) {
+    const missing = trailingNames[values.length] ?? trailingNames[0] ?? part.name;
+    throw new Error(`Missing required trailing positional argument '${missing}'`);
+  }
+
+  const varargEnd = values.length - trailingNames.length;
+  const trailing: Record<string, ArgumentValue> = {};
+  for (let i = 0; i < trailingNames.length; i += 1) {
+    trailing[trailingNames[i]!] = values[varargEnd + i]!;
+  }
+
+  return {
+    argsValue: values.slice(0, varargEnd),
+    trailing,
+    nextIndex: endIndex
+  };
+}
+
+function parseRichParts(
+  parts: StatementPartDefinition[],
+  segments: StatementSegment[],
+  startIndex: number,
+  inheritedStopNames: string[],
+  expressionConfig: ExpressionParserConfig,
+  statementDefinition: Required<StatementDefinition>,
+  lineOffset: number,
+  stopAtBlock = false
+): RichParseResult {
+  const args: StatementArguments = {};
+  const blocks: StatementBlocks = {};
+  const clauses: StatementClauses = {};
+  const stops = clauseStopNames(parts, inheritedStopNames);
+  let index = startIndex;
+
+  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+    const part = parts[partIndex]!;
+    if (part.kind === "clause") {
+      let occurrences = 0;
+      while (segmentIdentifier(segments[index]) === part.name) {
+        const child = parseRichParts(
+          part.parts ?? [],
+          segments,
+          index + 1,
+          stops.filter((name) => name !== part.name),
+          expressionConfig,
+          statementDefinition,
+          lineOffset,
+          part.block !== undefined
+        );
+        index = child.nextIndex;
+
+        const clauseBlock: StatementBlocks = { ...child.blocks };
+        if (part.block) {
+          const segment = segments[index];
+          if (!isBlockSegment(segment)) {
+            throw new Error(`Expected nested block after clause '${part.name}'`);
+          }
+          clauseBlock[part.name] = parseNestedBlockValue(segment!.tokens, 0).value;
+          index += 1;
+        }
+
+        addClause(clauses, part.name, {
+          args: child.args,
+          blocks: clauseBlock,
+          clauses: child.clauses
+        });
+
+        if (part.block && clauseBlock[part.name]) {
+          const existing = blocks[part.name];
+          const value = clauseBlock[part.name] as NestedBlockNode;
+          blocks[part.name] = existing
+            ? [...(Array.isArray(existing) ? existing : [existing]), value]
+            : value;
+        }
+
+        occurrences += 1;
+        if (!part.vararg) {
+          break;
+        }
+      }
+
+      if (!part.optional && occurrences === 0) {
+        throw new Error(`Missing required clause '${part.name}'`);
+      }
+      continue;
+    }
+
+    if (part.kind === "argument" && part.vararg) {
+      const parsed = parseVarargValues(part, segments, index, stops, expressionConfig, statementDefinition, lineOffset);
+      args[part.name] = parsed.argsValue;
+      for (const [name, value] of Object.entries(parsed.trailing)) {
+        args[name] = value;
+      }
+      index = parsed.nextIndex;
+      continue;
+    }
+
+    const before = index;
+    const hasLaterValuePart = parts.slice(partIndex + 1).some((candidate) => candidate.kind !== "clause");
+    const parsed = parseRichValuePart(part, segments, index, stops, expressionConfig, statementDefinition, lineOffset, hasLaterValuePart, stopAtBlock);
+    if (parsed.nextIndex === before && part.optional) {
+      continue;
+    }
+    assignRichPartValue(args, blocks, part, parsed.value);
+    index = parsed.nextIndex;
+  }
+
+  return {
+    args,
+    blocks,
+    clauses,
+    nextIndex: index
+  };
+}
+
 export function createParser(config: ParserConfig): GenericParser {
   const baseScope = resolveScopeFromConfig(config);
 
@@ -521,12 +906,58 @@ export function createParser(config: ParserConfig): GenericParser {
         throw createParserError("A statement must start with an identifier", startLine, statementToken);
       }
 
-      const name = statementToken.value;
-      const statementDefinition = resolveStatementDefinition(activeScope, name);
-      const remainder = trimIgnorableEdges(tokens.slice(statementIndex + 1));
+      const statementSegments = splitStatementSegments(tokens.slice(statementIndex));
+      let statementSegmentIndex = 0;
+      let name = statementToken.value;
+      let statementDefinition = normalizeStatementDefinition(activeScope.statements?.[name] ?? activeScope.defaultStatement);
+      const parsedQualifiers: Record<string, boolean> = {};
+
+      if (!activeScope.statements?.[name] && activeScope.statements) {
+        for (let index = 1; index < statementSegments.length; index += 1) {
+          const candidateName = segmentIdentifier(statementSegments[index]);
+          const candidateDefinition = candidateName ? activeScope.statements[candidateName] : undefined;
+          if (!candidateName || !candidateDefinition) {
+            continue;
+          }
+
+          const qualifierNames = new Set((candidateDefinition.qualifiers ?? []).map((qualifier) => qualifier.keyword));
+          const prefixSegments = statementSegments.slice(0, index);
+          const prefixIsQualifierList = prefixSegments.every((segment) => {
+            const identifier = segmentIdentifier(segment);
+            return identifier !== undefined && qualifierNames.has(identifier);
+          });
+
+          if (prefixIsQualifierList) {
+            statementSegmentIndex = index;
+            name = candidateName;
+            statementDefinition = normalizeStatementDefinition(candidateDefinition);
+            for (const segment of prefixSegments) {
+              const identifier = segmentIdentifier(segment)!;
+              parsedQualifiers[identifier] = true;
+            }
+            break;
+          }
+        }
+      }
+
+      if (!activeScope.statements?.[name] && activeScope.strictStatements) {
+        throw new Error(`Unknown statement '${name}'`);
+      }
+
+      for (const qualifier of statementDefinition.qualifiers) {
+        if (!(qualifier.keyword in parsedQualifiers)) {
+          parsedQualifiers[qualifier.keyword] = false;
+        }
+      }
+
+      const remainder = trimIgnorableEdges(
+        statementSegmentIndex === 0
+          ? tokens.slice(statementIndex + 1)
+          : tokens.slice(statementIndex + statementSegments[statementSegmentIndex]!.endTokenIndex)
+      );
       const compactRemainder = compactTokens(remainder);
 
-      if (activeScope.allowAssignmentStatements && compactRemainder[0]?.type === "operator" && compactRemainder[0].value === "=") {
+      if (statementSegmentIndex === 0 && activeScope.allowAssignmentStatements && compactRemainder[0]?.type === "operator" && compactRemainder[0].value === "=") {
         const value = parseExpressionFromTokens(compactRemainder.slice(1), expressionConfig, startLine);
         return {
           kind: "assignment",
@@ -538,8 +969,25 @@ export function createParser(config: ParserConfig): GenericParser {
 
       let args: StatementArguments = {};
       let blocks: StatementBlocks = {};
+      let clauses: StatementClauses | undefined;
 
-      if (statementDefinition.parts.length > 0) {
+      if (statementUsesRichParts(statementDefinition)) {
+        const parsed = parseRichParts(
+          statementDefinition.parts,
+          splitStatementSegments(remainder),
+          0,
+          [],
+          expressionConfig,
+          statementDefinition,
+          startLine
+        );
+        args = parsed.args;
+        blocks = parsed.blocks;
+        clauses = parsed.clauses;
+        if (!statementDefinition.allowExtraArguments && parsed.nextIndex < splitStatementSegments(remainder).length) {
+          throw new Error("Unexpected extra arguments");
+        }
+      } else if (statementDefinition.parts.length > 0) {
         const parsed = parseStatementValuesByDefinition(remainder, expressionConfig, statementDefinition, startLine);
         args = parsed.args;
         blocks = parsed.blocks;
@@ -561,6 +1009,8 @@ export function createParser(config: ParserConfig): GenericParser {
         name,
         args,
         blocks,
+        ...(Object.keys(parsedQualifiers).length > 0 ? { qualifiers: parsedQualifiers } : {}),
+        ...(clauses ? { clauses } : {}),
         raw: line
       };
     });

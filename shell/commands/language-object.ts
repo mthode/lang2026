@@ -1,7 +1,6 @@
 import {
   cloneLanguage,
   cloneOperatorSet,
-  cloneStatementSet,
   compactTokens,
   createLanguage,
   extractNestedBlock,
@@ -31,9 +30,9 @@ export const executeOperatorsCommand: ShellCommandExecutor = (command, _context,
 
 export const executeStatementsCommand: ShellCommandExecutor = (command, _context, environment) => {
   const declarationSource = readDeclarationSource(command.args.declaration, "'statements' requires: statements NAME { STATEMENTS }");
-  const { name, definition } = parseStatementSetDeclaration(declarationSource);
+  const { name, definition } = parseStatementSetDeclaration(declarationSource, environment.statementDeclarations);
 
-  registerStatementSet(environment.statementSets, name, cloneStatementSet(definition));
+  registerStatementSet(environment.statementSets, name, definition);
   return undefined;
 };
 
@@ -137,7 +136,10 @@ function parseOperatorSetDeclaration(source: string): { name: string; definition
   };
 }
 
-function parseStatementSetDeclaration(source: string): { name: string; definition: StatementSetDefinition } {
+function parseStatementSetDeclaration(
+  source: string,
+  statementDeclarations: ReadonlyMap<string, StatementSetDefinition["statements"][string]>
+): { name: string; definition: StatementSetDefinition } {
   const { name, body } = parseNamedBlockDeclaration(source, "statement set");
   const tokens = compactTokens(scan(body));
   const statements: StatementSetDefinition["statements"] = {};
@@ -157,7 +159,7 @@ function parseStatementSetDeclaration(source: string): { name: string; definitio
       throw new Error(`Unsupported statement set construct '${token.value}'`);
     }
 
-    const definition = shellStatementDefinitions[token.value];
+    const definition = shellStatementDefinitions[token.value] ?? statementDeclarations.get(token.value);
     if (!definition) {
       throw new Error(`Unknown statement '${token.value}'`);
     }

@@ -1,21 +1,16 @@
 # Parser Reference
 
-This directory contains the parser used by the shell language. It has two related jobs:
+This directory contains the parser used by the shell language. It has one primary job:
 
-1. Parse ordinary shell statements such as commands and assignments.
-2. Parse user-defined command declarations and parse invocations against those declarations.
+1. Parse ordinary statements such as commands and assignments.
 
-The scanner tokenizes input first. The parser then builds structured nodes for statements, command declarations, and parsed invocations.
+The scanner tokenizes input first. The parser then builds structured statement nodes from parser-owned language configuration.
 
 ## Public API
 
 Use these entry points depending on the layer you are working in:
 
 - `createParser(config)` parses normal shell lines and scripts.
-- `parseStatementDeclaration(tokens)` parses a `cmd` declaration into a `StatementDeclaration`.
-- `validateDeclaration(decl, existingCommandNames)` enforces declaration-level rules.
-- `parseInvocation(tokens, decl, options?)` parses one invocation against a specific declaration.
-- `validateInvocation(result, decl)` enforces required-clause and clause-cardinality rules after parsing.
 
 Named-language resolution helpers are also exported for the shell runtime:
 
@@ -23,7 +18,29 @@ Named-language resolution helpers are also exported for the shell runtime:
 - `resolveNamedStatementSet(registry, name)`
 - `resolveNamedLanguage(registry, name)`
 
+## Statement Definitions
+
+Parser statement shapes are represented by `StatementDefinition` in `statement.ts`. Named statement sets and languages consume that type directly.
+
+`StatementDefinition` currently models:
+
+- positional and named arguments
+- raw or expression-valued arguments
+- optional and vararg parts
+- nested block parts
+- qualifiers
+- keyed clauses, including nested and repeated clauses
+- invocation-time block clauses
+- block language metadata
+- vararg trailing named arguments
+- selected expression operators for statement arguments
+- strict statement-set membership through `StatementSetDefinition`
+
+Shell-facing declaration helpers for `cmd` and `stmt` live in `shell/declaration.ts` and `shell/invocation.ts`. Those helpers are not a second parser-owned statement model; shell code adapts `stmt` declarations into `StatementDefinition` before they can enter statement sets or languages.
+
 ## Command Declarations
+
+Command declaration parsing is shell-owned. The notes below describe shell helper behavior, not parser-owned APIs.
 
 User-defined commands are declared with `cmd`:
 

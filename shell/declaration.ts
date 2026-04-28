@@ -1,6 +1,6 @@
 import type { Token } from "../scanner/index.js";
-import { type ArgumentValue, type NestedBlockNode } from "./statement.js";
-import { isIgnorable } from "./expression.js";
+import { type ArgumentValue, type NestedBlockNode } from "../parser/statement.js";
+import { isIgnorable } from "../parser/expression.js";
 
 export interface PositionalArgDecl {
   kind: "named" | "unnamed";

@@ -311,47 +311,171 @@ describe("shell eval command", () => {
 
     expect(defineOutput).toBeUndefined();
     expect(environment.statementDeclarations.get("declare")).toMatchObject({
-      name: "declare",
-      argDecls: {
-        positional: [{ kind: "named", name: "name", optional: false }],
-        keyedClauses: []
-      },
-      blocks: []
+      parts: [
+        { kind: "argument", name: "name", valueKind: "expression", positional: true, optional: false }
+      ]
     });
     expect(environment.commands.has("declare")).toBe(false);
   });
 
-  it("keeps stmt declarations declarative, including block metadata and unresolved names", () => {
+  it("supports rich stmt declarations through StatementDefinition", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(
-      parseShellLine("stmt --evaluate missing_ops choose condition (then {} :: then_lang) [else {}]"),
+      parseShellLine("stmt --evaluate shell_ops verbose? choose condition (then {} :: then_lang) [else {}]"),
       environment
     );
+    executeShellCommand(parseShellLine("statements rich_shell { choose }"), environment);
+    executeShellCommand(parseShellLine("language rich_lang statements rich_shell operators shell_ops"), environment);
 
-    expect(environment.statementDeclarations.get("choose")).toMatchObject({
-      name: "choose",
-      argumentOperatorSetName: "missing_ops",
-      blocks: [],
-      argDecls: {
-        positional: [{ kind: "named", name: "condition", optional: false }],
-        keyedClauses: [
-          {
-            keyword: "then",
-            required: true,
-            allowMultiple: false,
-            block: { languageName: "then_lang" }
-          },
-          {
-            keyword: "else",
-            required: false,
-            allowMultiple: false,
-            block: {}
-          }
-        ]
-      }
+    const definition = environment.statementDeclarations.get("choose");
+    expect(definition).toMatchObject({
+      qualifiers: [{ keyword: "verbose" }],
+      parts: [
+        { kind: "argument", name: "condition" },
+        { kind: "clause", name: "then", block: { languageName: "then_lang" } },
+        { kind: "clause", name: "else", optional: true, block: {} }
+      ]
     });
-    expect(environment.commands.has("choose")).toBe(false);
+
+    const language = environment.languages.get("rich_lang");
+    if (!language) throw new Error("expected language");
+
+    const parsed = parseShellLine("verbose choose 1 + 2 then { echo yes } else { echo no }", undefined, language);
+    expect(parsed.kind).toBe("statement");
+    if (parsed.kind !== "statement") throw new Error("expected statement");
+    expect(parsed.qualifiers).toEqual({ verbose: true });
+    expect(parsed.args.condition).toMatchObject({ kind: "binary", operator: "+" });
+    expect(parsed.blocks.then).toMatchObject({ kind: "nested-block", content: "echo yes" });
+    expect(parsed.blocks.else).toMatchObject({ kind: "nested-block", content: "echo no" });
+  });
+
+  it("parses stmt keyed clauses with arguments, nesting, repetition, and vararg trailing names", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt move (from source (within scope)) (to destination)"), environment);
+    executeShellCommand(parseShellLine("stmt match [case value {}]*"), environment);
+    executeShellCommand(parseShellLine("stmt cp _ ... destination"), environment);
+    executeShellCommand(parseShellLine("statements rich_statements { move match cp }"), environment);
+    executeShellCommand(parseShellLine("language rich_statements_lang statements rich_statements operators shell_ops"), environment);
+
+    const language = environment.languages.get("rich_statements_lang");
+    if (!language) throw new Error("expected language");
+
+    const move = parseShellLine("move from home within root to out", undefined, language);
+    expect(move.kind).toBe("statement");
+    if (move.kind !== "statement") throw new Error("expected statement");
+    expect(move.clauses?.from?.[0]?.args.source).toMatchObject({ kind: "identifier", name: "home" });
+    expect(move.clauses?.from?.[0]?.clauses.within?.[0]?.args.scope).toMatchObject({ kind: "identifier", name: "root" });
+    expect(move.clauses?.to?.[0]?.args.destination).toMatchObject({ kind: "identifier", name: "out" });
+
+    const match = parseShellLine("match case one { echo one } case two { echo two }", undefined, language);
+    expect(match.kind).toBe("statement");
+    if (match.kind !== "statement") throw new Error("expected statement");
+    expect(match.clauses?.case).toHaveLength(2);
+    expect(match.blocks.case).toEqual([
+      { kind: "nested-block", content: "echo one" },
+      { kind: "nested-block", content: "echo two" }
+    ]);
+
+    const cp = parseShellLine("cp a b c dst", undefined, language);
+    expect(cp.kind).toBe("statement");
+    if (cp.kind !== "statement") throw new Error("expected statement");
+    expect(cp.args.arg0).toMatchObject({ kind: "identifier", name: "a" });
+    expect(cp.args.args).toHaveLength(2);
+    expect(cp.args.destination).toMatchObject({ kind: "identifier", name: "dst" });
+  });
+
+  it("allows stmt declarations in statement sets and custom languages", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt choose condition (then {}) [else {}]"), environment);
+    executeShellCommand(parseShellLine("statements mini_shell { echo choose }"), environment);
+    executeShellCommand(parseShellLine("language mini_lang statements mini_shell operators shell_ops"), environment);
+
+    const language = environment.languages.get("mini_lang");
+    if (!language) throw new Error("expected language");
+
+    const parsed = parseShellLine("choose 1 then { echo yes } else { echo no }", undefined, language);
+    expect(parsed.kind).toBe("statement");
+    if (parsed.kind !== "statement") throw new Error("expected statement");
+    expect(parsed.name).toBe("choose");
+    expect(parsed.args.condition).toMatchObject({ kind: "number", value: 1 });
+    expect(parsed.blocks.then).toMatchObject({ kind: "nested-block", content: "echo yes" });
+    expect(parsed.blocks.else).toMatchObject({ kind: "nested-block", content: "echo no" });
+  });
+
+  it("keeps stmt names out of the ambient shell language until a custom language includes them", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt choose condition (then {}) [else {}]"), environment);
+
+    expect(() =>
+      parseShellLine("choose 1 then { echo yes }", undefined, environment.languages.get("shell"))
+    ).not.toThrow();
+    expect(() =>
+      executeShellCommand(parseShellLine("choose 1 then { echo yes }"), environment)
+    ).toThrowError("OS commands are not available on the web");
+  });
+
+  it("keeps live statement definition references in statement sets and languages", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt declare name"), environment);
+    executeShellCommand(parseShellLine("statements decl_statements { declare }"), environment);
+    executeShellCommand(parseShellLine("language decl_lang statements decl_statements operators shell_ops"), environment);
+
+    const declaration = environment.statementDeclarations.get("declare");
+    if (!declaration?.parts?.[0] || declaration.parts[0].kind !== "argument") {
+      throw new Error("expected declaration argument");
+    }
+    declaration.parts[0].name = "renamed";
+
+    const language = environment.languages.get("decl_lang");
+    if (!language) throw new Error("expected language");
+
+    const parsed = parseShellLine("declare value", undefined, language);
+    expect(parsed.kind).toBe("statement");
+    if (parsed.kind !== "statement") throw new Error("expected statement");
+    expect(parsed.args.renamed).toMatchObject({ kind: "identifier", name: "value" });
+    expect(parsed.args.name).toBeUndefined();
+  });
+
+  it("does not execute parse-only stmt declarations through the shell runtime", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt choose condition (then {}) [else {}]"), environment);
+    executeShellCommand(parseShellLine("statements mini_shell { choose }"), environment);
+    executeShellCommand(parseShellLine("language mini_lang statements mini_shell operators shell_ops"), environment);
+
+    const language = environment.languages.get("mini_lang");
+    if (!language) throw new Error("expected language");
+
+    const parsed = parseShellLine("choose 1 then { echo yes }", undefined, language);
+    expect(() => executeShellCommand(parsed, environment, language)).toThrowError("OS commands are not available on the web");
+  });
+
+  it("rejects duplicate stmt names in statement sets", () => {
+    const environment = createShellEnvironment();
+
+    executeShellCommand(parseShellLine("stmt declare name"), environment);
+
+    expect(() =>
+      executeShellCommand(parseShellLine("statements dup_decl { declare declare }"), environment)
+    ).toThrowError("Duplicate statement 'declare' in statement set body");
+  });
+
+  it("prefers built-in statements over stmt declarations when resolving statement sets", () => {
+    const environment = createShellEnvironment();
+
+    const echoDefinition = environment.statementSets.get("shell_statements")?.statements.echo;
+    environment.statementDeclarations.set("echo", {
+      parts: [{ kind: "argument", name: "renamed", valueKind: "expression", positional: true }]
+    });
+
+    executeShellCommand(parseShellLine("statements echo_only { echo }"), environment);
+
+    expect(environment.statementSets.get("echo_only")?.statements.echo).toBe(echoDefinition);
   });
 
   it("rejects content-bearing trailing blocks in stmt declarations", () => {

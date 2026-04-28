@@ -143,6 +143,25 @@ Argument declaration format:
 
 Use `$argName` inside command bodies.
 
+### `stmt`
+
+Register a parser-level statement shape.
+
+Syntax:
+
+- `stmt STATEMENT_NAME ARG_DECLS`
+- `stmt STATEMENT_NAME ARG_DECLS (blockName {}) [optionalBlock {}]`
+
+Example:
+
+- `stmt choose condition (then {}) [else {}]`
+- `statements mini_shell { echo choose }`
+- `language mini_lang statements mini_shell operators shell_ops`
+
+`stmt` declarations are intentionally parse-only in the current runtime. They can be pulled into named `statements` sets and used by named `language` objects, but they do not create executable shell commands. If such a parsed statement is executed by the shell without a future runtime handler, it follows the normal fallback path for unknown commands.
+
+`stmt` declarations are converted into parser-owned `StatementDefinition` values. The supported declaration surface includes qualifiers, `--evaluate` operator-set selection, positional arguments, top-level blocks, block language annotations, keyed clauses with ordinary arguments, invocation-time block clauses, nested keyed clauses, repeated keyed clauses, and vararg trailing named arguments.
+
 ### `func`
 
 Define an expression function.

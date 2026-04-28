@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createParser } from "../parser/index.js";
 import { parseShellLine, parseShellScript } from "../shell/index.js";
-import { parseStatementDeclaration } from "../parser/declaration.js";
+import { parseStatementDeclaration } from "../shell/declaration.js";
 import { scan } from "../scanner/index.js";
-import { validateDeclaration } from "../parser/declaration.js";
-import { parseInvocation, validateInvocation } from "../parser/invocation.js";
+import { validateDeclaration } from "../shell/declaration.js";
+import { parseInvocation, validateInvocation } from "../shell/invocation.js";
 import { createLanguage, toExpressionParserConfig, toParserConfig, toStatementParserDefinition } from "../parser/language.js";
 import type { Language, OperatorSetDefinition, StatementSetDefinition } from "../parser/index.js";
 
@@ -105,7 +105,7 @@ describe("parser", () => {
     expect((extras as unknown[]).length).toBe(3);
   });
 
-  it("converts named language objects into parser configs without aliasing source definitions", () => {
+  it("converts named language objects into parser configs with live statement definitions", () => {
     const operatorSet: OperatorSetDefinition = {
       name: "math_ops",
       prefixOperators: {
@@ -163,8 +163,8 @@ describe("parser", () => {
     parserConfig.statements!.calc!.parts![0]!.name = "mutated";
 
     expect(operatorSet.prefixOperators["+"]).toBeUndefined();
-    expect(statementSet.statements.calc?.parts?.[0]?.name).toBe("expr");
-    expect(language.statementSet.statements.calc?.parts?.[0]?.name).toBe("expr");
+    expect(statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
+    expect(language.statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
   });
 
   it("includes line and column for token-specific parse errors", () => {

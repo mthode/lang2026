@@ -1,10 +1,10 @@
 import type { Token } from "../scanner/index.js";
-import { extractNestedBlock, type ArgumentValue, type NestedBlockNode } from "./statement.js";
+import { extractNestedBlock, type ArgumentValue, type NestedBlockNode } from "../parser/statement.js";
 import {
   isIgnorable,
   parseExpressionFromTokens,
   type ExpressionParserConfig
-} from "./expression.js";
+} from "../parser/expression.js";
 import type { ArgDeclGroup, ClauseBlockDecl, ParsedArguments, ParsedStatement, StatementDeclaration } from "./declaration.js";
 
 interface ClauseParseState {

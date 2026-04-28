@@ -1,10 +1,20 @@
 import {
   extractNestedBlock,
-  parseStatementDeclaration,
-  validateDeclaration
+  resolveNamedOperatorSet,
+  toExpressionParserConfig
 } from "../../parser/index.js";
 import { isIgnorable } from "../../parser/expression.js";
 import { scan, type Token } from "../../scanner/index.js";
+import type { OperatorSetDefinition, StatementDefinition, StatementPartDefinition } from "../../parser/index.js";
+import {
+  parseStatementDeclaration,
+  validateDeclaration,
+  type ArgDeclGroup,
+  type KeyedClauseDecl,
+  type PositionalArgDecl,
+  type StatementBlockDecl,
+  type StatementDeclaration
+} from "../declaration.js";
 import { shellStatementDefinitions } from "../custom-language.js";
 import type { ShellCommandExecutor } from "./types.js";
 
@@ -43,9 +53,93 @@ export const executeStmtCommand: ShellCommandExecutor = (command, _context, envi
     ])
   );
 
-  environment.statementDeclarations.set(declaration.name, declaration);
+  environment.statementDeclarations.set(
+    declaration.name,
+    statementDefinitionFromDeclaration(declaration, environment.operatorSets)
+  );
   return undefined;
 };
+
+export function statementDefinitionFromDeclaration(
+  declaration: StatementDeclaration,
+  operatorSets: ReadonlyMap<string, OperatorSetDefinition> = new Map()
+): StatementDefinition {
+  const parts: StatementPartDefinition[] = [];
+  appendArgGroupParts(declaration.name, declaration.argDecls, parts);
+
+  for (const block of declaration.blocks) {
+    parts.push(statementBlockToPart(declaration.name, block));
+  }
+
+  const argumentOperatorSet = declaration.argumentOperatorSetName
+    ? toExpressionParserConfig(resolveNamedOperatorSet(operatorSets, declaration.argumentOperatorSetName))
+    : undefined;
+
+  return {
+    parts,
+    qualifiers: declaration.qualifiers.map((qualifier) => ({ keyword: qualifier.keyword })),
+    ...(argumentOperatorSet ? { argumentExpressionOperators: argumentOperatorSet } : {})
+  };
+}
+
+function appendArgGroupParts(statementName: string, group: ArgDeclGroup, parts: StatementPartDefinition[]): void {
+  group.positional.forEach((arg, index) => {
+    parts.push(positionalArgToPart(arg, index));
+  });
+
+  for (const clause of group.keyedClauses) {
+    parts.push(keyedClauseToPart(statementName, clause));
+  }
+
+  if (!group.vararg) {
+    return;
+  }
+
+  parts.push({
+    kind: "argument",
+    name: "args",
+    valueKind: "expression",
+    positional: true,
+    optional: true,
+    vararg: true,
+    trailingNamedArguments: group.vararg.trailingNamedArgs
+  });
+}
+
+function positionalArgToPart(arg: PositionalArgDecl, index: number): StatementPartDefinition {
+  return {
+    kind: "argument",
+    name: arg.kind === "named" && arg.name ? arg.name : `arg${index}`,
+    valueKind: "expression",
+    positional: true,
+    optional: arg.optional
+  };
+}
+
+function keyedClauseToPart(statementName: string, clause: KeyedClauseDecl): StatementPartDefinition {
+  const parts: StatementPartDefinition[] = [];
+  appendArgGroupParts(statementName, clause.argDecls, parts);
+
+  return {
+    kind: "clause",
+    name: clause.keyword,
+    optional: !clause.required,
+    vararg: clause.allowMultiple,
+    parts,
+    ...(clause.block ? { block: { ...(clause.block.languageName ? { languageName: clause.block.languageName } : {}) } } : {})
+  };
+}
+
+function statementBlockToPart(statementName: string, block: StatementBlockDecl): StatementPartDefinition {
+  return {
+    kind: "block",
+    name: block.name,
+    positional: block.name === "body",
+    optional: !block.required,
+    vararg: block.allowMultiple,
+    ...(block.languageName ? { languageName: block.languageName } : {})
+  };
+}
 
 interface StatementDeclarationBlock {
   name: string;

@@ -38,10 +38,13 @@ calc 1 + 2
 Current constraints:
 
 - `operators` supports `prefix` and `infix` entries only.
-- `statements` supports direct statement membership only.
+- `stmt` registers parser-level statement shapes. It does not create an executable command.
+- `statements` supports direct membership of built-in shell statements and registered `stmt` names.
 - `language` references one named statement set and one named operator set.
 - `cmd --evaluate Name` selects the operator set used to parse invocation arguments.
 - `} :: Name` selects the language used to parse and execute the command body.
+- Custom statements included through `stmt` are parse-only today. Executing one falls through normal shell command resolution unless a runtime handler is added later.
+- `stmt` declarations are lowered into parser-owned `StatementDefinition` values, including qualifiers, selected argument operator sets, keyed clauses, invocation blocks, block language metadata, nested clauses, repeated clauses, and vararg trailing names.
 
 ## Quick start
 

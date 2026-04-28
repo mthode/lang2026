@@ -1,15 +1,16 @@
 import type { Language, NamedStatementNode, StatementNode } from "../../parser/index.js";
 import type { ExpressionRuntimeEnvironment, LangFunctionDefinition } from "../../lang/types.js";
-import type { StatementDeclaration } from "../../parser/declaration.js";
+import type { StatementDeclaration } from "../declaration.js";
 import type {
   OperatorSetDefinition,
+  StatementDefinition,
   StatementSetDefinition
 } from "../../parser/index.js";
 import { createShellLanguageRegistries } from "../custom-language.js";
 
 export interface ShellEnvironment extends ExpressionRuntimeEnvironment {
   commands: Map<string, UserCommandDefinition>;
-  statementDeclarations: Map<string, StatementDeclaration>;
+  statementDeclarations: Map<string, StatementDefinition>;
   expressionFunctions: Map<string, LangFunctionDefinition>;
   operatorSets: Map<string, OperatorSetDefinition>;
   statementSets: Map<string, StatementSetDefinition>;
