@@ -5,7 +5,7 @@ This is an early stage project and the API stability doesn't need to be maintain
 
 # Planning Rules
 
-When planning a new feature, add a plan markdown document in the dev-notes folder.  
+When planning a new feature, add a plan markdown document in the `plans` folder.  
 
 The document should follow these rules...
 - Break the work down into managable tasks.  All tasks should have checkboxes to indicate when they are complete.  Tasks should be numbered so that it is easy to reference them in conversation.

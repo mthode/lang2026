@@ -1,5 +1,7 @@
 # Generalize Parser Commands Into Statements
 
+Implementation of the features in the doc are complete.
+
 ## Goal
 
 Refactor the parser so its declaration and invocation model is about general-purpose `Statement`s instead of shell-specific commands.
@@ -129,6 +131,8 @@ The shell now keeps two different declaration surfaces:
 
 - `cmd` declares executable shell commands
 - `stmt` declares general parser-level statements
+
+Detailed follow-up planning for `stmt` now lives in `plans/stmt.md`. This note keeps only the broader parser/shell boundary decisions that still matter to the general statement model.
 
 `cmd` should stay narrow:
 
