@@ -6,13 +6,16 @@ import { parseStatementExpressionSource } from "./expression.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export interface ForStatement<TStatement> {
-  kind: "for";
-  iterator: string;
-  from: ExpressionNode;
-  to: ExpressionNode;
-  step: ExpressionNode;
-  body: TStatement[];
+export class ForStatement<TStatement> {
+  readonly kind = "for";
+
+  constructor(
+    readonly iterator: string,
+    readonly from: ExpressionNode,
+    readonly to: ExpressionNode,
+    readonly step: ExpressionNode,
+    readonly body: TStatement[]
+  ) {}
 }
 
 export function parseForStatement<TStatement>(
@@ -42,14 +45,13 @@ export function parseForStatement<TStatement>(
     throw new Error("Unexpected trailing content after function for-statement");
   }
 
-  return {
-    kind: "for",
+  return new ForStatement(
     iterator,
-    from: parseStatementExpressionSource(ranges.fromSource),
-    to: parseStatementExpressionSource(ranges.toSource),
-    step: parseStatementExpressionSource(ranges.stepSource ?? "1"),
-    body: parseBody(bodyBlock.content)
-  };
+    parseStatementExpressionSource(ranges.fromSource),
+    parseStatementExpressionSource(ranges.toSource),
+    parseStatementExpressionSource(ranges.stepSource ?? "1"),
+    parseBody(bodyBlock.content)
+  );
 }
 
 export function evaluateForStatement<TStatement>(

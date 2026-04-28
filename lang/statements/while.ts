@@ -5,10 +5,13 @@ import { parseStatementExpressionSource } from "./expression.js";
 
 const MAX_LOOP_ITERATIONS = 10_000;
 
-export interface WhileStatement<TStatement> {
-  kind: "while";
-  condition: ExpressionNode;
-  body: TStatement[];
+export class WhileStatement<TStatement> {
+  readonly kind = "while";
+
+  constructor(
+    readonly condition: ExpressionNode,
+    readonly body: TStatement[]
+  ) {}
 }
 
 export function parseWhileStatement<TStatement>(
@@ -33,11 +36,7 @@ export function parseWhileStatement<TStatement>(
     throw new Error("Unexpected trailing content after function while-statement");
   }
 
-  return {
-    kind: "while",
-    condition: parseStatementExpressionSource(conditionSource),
-    body: parseBody(bodyBlock.content)
-  };
+  return new WhileStatement(parseStatementExpressionSource(conditionSource), parseBody(bodyBlock.content));
 }
 
 export function evaluateWhileStatement<TStatement>(

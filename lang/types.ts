@@ -1,7 +1,9 @@
-export interface LangFunctionDefinition {
-  name: string;
-  parameters: string[];
-  body: string;
+export class LangFunctionDefinition {
+  constructor(
+    readonly name: string,
+    readonly parameters: string[],
+    readonly body: string
+  ) {}
 }
 
 export interface ExpressionRuntimeEnvironment {

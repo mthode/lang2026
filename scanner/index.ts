@@ -8,17 +8,21 @@ export type TokenType =
   | "comment"
   | "newline";
 
-export interface Token {
-  type: TokenType;
-  value: string;
-  line: number;
-  column: number;
-  offset: number;
+export class Token {
+  constructor(
+    readonly type: TokenType,
+    readonly value: string,
+    readonly line: number,
+    readonly column: number,
+    readonly offset: number
+  ) {}
 }
 
-export interface LogicalLine {
-  content: string;
-  startLine: number;
+export class LogicalLine {
+  constructor(
+    readonly content: string,
+    readonly startLine: number
+  ) {}
 }
 
 const delimiterChars = new Set(["(", ")", "[", "]", "{", "}", ",", ".", ";"]);
@@ -51,7 +55,7 @@ export function scan(input: string): Token[] {
   let bracketBalance = 0;
 
   const push = (type: TokenType, value: string, startLine: number, startColumn: number, offset: number): void => {
-    tokens.push({ type, value, line: startLine, column: startColumn, offset });
+    tokens.push(new Token(type, value, startLine, startColumn, offset));
   };
 
   while (i < input.length) {
@@ -296,7 +300,7 @@ export function splitLogicalLinesWithMetadata(input: string): LogicalLine[] {
     }
 
     if (current.trim().length > 0) {
-      logicalLines.push({ content: current, startLine: logicalStartLine });
+      logicalLines.push(new LogicalLine(current, logicalStartLine));
     }
 
     current = "";
@@ -304,7 +308,7 @@ export function splitLogicalLinesWithMetadata(input: string): LogicalLine[] {
   }
 
   if (current.trim().length > 0) {
-    logicalLines.push({ content: current, startLine: logicalStartLine });
+    logicalLines.push(new LogicalLine(current, logicalStartLine));
   }
 
   return logicalLines;

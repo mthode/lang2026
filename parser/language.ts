@@ -1,47 +1,63 @@
-import type { ParserConfig, StatementDefinition } from "./statement.js";
-import type {
+import { ParserConfig, type StatementDefinition } from "./statement.js";
+import {
   ExpressionParserConfig,
-  InfixOperatorDefinition,
-  PrefixOperatorDefinition
+  type InfixOperatorDefinition,
+  type PrefixOperatorDefinition
 } from "./expression.js";
 
-export interface OperatorSetDefinition {
+export class OperatorSetDefinition {
   name?: string;
   prefixOperators: Record<string, PrefixOperatorDefinition>;
   infixOperators: Record<string, InfixOperatorDefinition>;
+
+  constructor(definition: OperatorSetDefinition) {
+    this.name = definition.name;
+    this.prefixOperators = definition.prefixOperators;
+    this.infixOperators = definition.infixOperators;
+  }
 }
 
-export interface StatementSetDefinition {
+export class StatementSetDefinition {
   name?: string;
   statements: Record<string, StatementDefinition>;
   defaultStatement?: StatementDefinition;
   strictStatements?: boolean;
+
+  constructor(definition: StatementSetDefinition) {
+    this.name = definition.name;
+    this.statements = definition.statements;
+    this.defaultStatement = definition.defaultStatement;
+    this.strictStatements = definition.strictStatements;
+  }
 }
 
-export interface Language {
+export class Language {
   statementSet: StatementSetDefinition;
   operatorSet: OperatorSetDefinition;
   allowAssignmentStatements?: boolean;
+
+  constructor(
+    parts: Pick<Language, "statementSet" | "operatorSet">,
+    overrides: Partial<Pick<Language, "allowAssignmentStatements">> = {}
+  ) {
+    this.operatorSet = cloneOperatorSet(parts.operatorSet);
+    this.statementSet = cloneStatementSet(parts.statementSet);
+    this.allowAssignmentStatements = overrides.allowAssignmentStatements;
+  }
 }
 
 export function createLanguage(
   parts: Pick<Language, "statementSet" | "operatorSet">,
   overrides: Partial<Pick<Language, "allowAssignmentStatements">> = {}
 ): Language {
-  return {
-    operatorSet: cloneOperatorSet(parts.operatorSet),
-    statementSet: cloneStatementSet(parts.statementSet),
-    ...(overrides.allowAssignmentStatements !== undefined
-      ? { allowAssignmentStatements: overrides.allowAssignmentStatements }
-      : {})
-  };
+  return new Language(parts, overrides);
 }
 
 export function toExpressionParserConfig(operatorSet: OperatorSetDefinition): ExpressionParserConfig {
-  return {
-    prefixOperators: { ...operatorSet.prefixOperators },
-    infixOperators: { ...operatorSet.infixOperators }
-  };
+  return new ExpressionParserConfig(
+    { ...operatorSet.prefixOperators },
+    { ...operatorSet.infixOperators }
+  );
 }
 
 export function toStatementParserDefinition(
@@ -55,13 +71,13 @@ export function toStatementParserDefinition(
 }
 
 export function toParserConfig(language: Language): ParserConfig {
-  return {
+  return new ParserConfig({
     ...toExpressionParserConfig(language.operatorSet),
     ...toStatementParserDefinition(language.statementSet),
     ...(language.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: language.allowAssignmentStatements }
       : {})
-  };
+  });
 }
 
 export function resolveNamedOperatorSet(
@@ -101,30 +117,32 @@ export function resolveNamedLanguage(
 }
 
 export function cloneLanguage(definition: Language): Language {
-  return {
-    operatorSet: cloneOperatorSet(definition.operatorSet),
-    statementSet: cloneStatementSet(definition.statementSet),
-    ...(definition.allowAssignmentStatements !== undefined
+  return new Language(
+    {
+      operatorSet: cloneOperatorSet(definition.operatorSet),
+      statementSet: cloneStatementSet(definition.statementSet)
+    },
+    definition.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: definition.allowAssignmentStatements }
-      : {})
-  };
+      : {}
+  );
 }
 
 export function cloneOperatorSet(definition: OperatorSetDefinition): OperatorSetDefinition {
-  return {
-    ...(definition.name !== undefined ? { name: definition.name } : {}),
+  return new OperatorSetDefinition({
+    name: definition.name,
     prefixOperators: { ...definition.prefixOperators },
     infixOperators: { ...definition.infixOperators }
-  };
+  });
 }
 
 export function cloneStatementSet(definition: StatementSetDefinition): StatementSetDefinition {
-  return {
-    ...(definition.name !== undefined ? { name: definition.name } : {}),
+  return new StatementSetDefinition({
+    name: definition.name,
     statements: cloneStatementDefinitions(definition.statements),
     strictStatements: definition.strictStatements,
     defaultStatement: definition.defaultStatement ? cloneStatementDefinition(definition.defaultStatement) : undefined
-  };
+  });
 }
 
 function cloneStatementDefinitions(

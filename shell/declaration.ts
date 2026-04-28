@@ -2,66 +2,84 @@ import type { Token } from "../scanner/index.js";
 import { type ArgumentValue, type NestedBlockNode } from "../parser/statement.js";
 import { isIgnorable } from "../parser/expression.js";
 
-export interface PositionalArgDecl {
-  kind: "named" | "unnamed";
-  name?: string;
-  optional: boolean;
+export class PositionalArgDecl {
+  constructor(
+    readonly kind: "named" | "unnamed",
+    readonly optional: boolean,
+    readonly name?: string
+  ) {}
 }
 
-export interface VarargDecl {
-  trailingNamedArgs: string[];
+export class VarargDecl {
+  constructor(readonly trailingNamedArgs: string[] = []) {}
 }
 
-export interface ClauseBlockDecl {
-  languageName?: string;
+export class ClauseBlockDecl {
+  constructor(readonly languageName?: string) {}
 }
 
-export interface KeyedClauseDecl {
-  keyword: string;
-  required: boolean;
-  allowMultiple: boolean;
-  argDecls: ArgDeclGroup;
-  block?: ClauseBlockDecl;
+export class KeyedClauseDecl {
+  constructor(
+    readonly keyword: string,
+    readonly required: boolean,
+    readonly allowMultiple: boolean,
+    readonly argDecls: ArgDeclGroup,
+    readonly block?: ClauseBlockDecl
+  ) {}
 }
 
-export interface QualifierDecl {
-  keyword: string;
+export class QualifierDecl {
+  constructor(readonly keyword: string) {}
 }
 
-export interface ArgDeclGroup {
-  positional: PositionalArgDecl[];
-  keyedClauses: KeyedClauseDecl[];
-  vararg?: VarargDecl;
+export class ArgDeclGroup {
+  constructor(
+    readonly positional: PositionalArgDecl[],
+    readonly keyedClauses: KeyedClauseDecl[],
+    readonly vararg?: VarargDecl
+  ) {}
 }
 
-export interface StatementBlockDecl {
-  name: string;
-  required: boolean;
-  allowMultiple: boolean;
-  languageName?: string;
+export class StatementBlockDecl {
+  constructor(
+    readonly name: string,
+    readonly required: boolean,
+    readonly allowMultiple: boolean,
+    readonly languageName?: string
+  ) {}
 }
 
-export interface StatementDeclaration {
-  name: string;
-  argumentOperatorSetName?: string;
-  qualifiers: QualifierDecl[];
-  argDecls: ArgDeclGroup;
-  blocks: StatementBlockDecl[];
-  globalKeywords: Set<string>;
+export class StatementDeclaration {
+  constructor(
+    readonly name: string,
+    readonly qualifiers: QualifierDecl[],
+    readonly argDecls: ArgDeclGroup,
+    readonly blocks: StatementBlockDecl[],
+    readonly globalKeywords: Set<string>,
+    readonly argumentOperatorSetName?: string
+  ) {}
 }
 
-export interface ParsedArguments {
-  clauseName: string;
-  namedArgs: Record<string, ArgumentValue>;
-  varArgs: ArgumentValue[];
-  clauses: Record<string, ParsedArguments[]>;
+export class ParsedArguments {
+  constructor(
+    readonly clauseName: string,
+    readonly namedArgs: Record<string, ArgumentValue>,
+    readonly varArgs: ArgumentValue[],
+    readonly clauses: Record<string, ParsedArguments[]>
+  ) {}
 }
 
-export interface ParsedStatement {
-  statementName: string;
-  qualifiers: Record<string, boolean>;
-  arguments: ParsedArguments;
-  blocks: Record<string, NestedBlockNode[]>;
+export class ParsedStatement {
+  readonly arguments: ParsedArguments;
+
+  constructor(
+    readonly statementName: string,
+    readonly qualifiers: Record<string, boolean>,
+    parsedArguments: ParsedArguments,
+    readonly blocks: Record<string, NestedBlockNode[]>
+  ) {
+    this.arguments = parsedArguments;
+  }
 }
 
 interface DeclarationParserState {
@@ -189,7 +207,7 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
         throw new Error("Expected '}' to complete block marker '{}'");
       }
       const languageName = parseBlockAnnotation(state);
-      block = languageName !== undefined ? { languageName } : {};
+      block = new ClauseBlockDecl(languageName);
       continue;
     }
 
@@ -199,7 +217,7 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
       }
 
       consumeNonIgnorable(state);
-      vararg = { trailingNamedArgs: [] };
+      vararg = new VarargDecl();
       continue;
     }
 
@@ -238,17 +256,13 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
         allowMultiple = true;
       }
 
-      keyedClauses.push({
-        keyword: keywordToken.value,
-        required: opener.value === "(",
+      keyedClauses.push(new KeyedClauseDecl(
+        keywordToken.value,
+        opener.value === "(",
         allowMultiple,
-        argDecls: {
-          positional: argDecls.positional,
-          keyedClauses: argDecls.keyedClauses,
-          ...(argDecls.vararg ? { vararg: argDecls.vararg } : {})
-        },
-        ...(argDecls.block ? { block: argDecls.block } : {})
-      });
+        new ArgDeclGroup(argDecls.positional, argDecls.keyedClauses, argDecls.vararg),
+        argDecls.block
+      ));
       sawKeyed = true;
       continue;
     }
@@ -284,19 +298,14 @@ function parseArgDeclGroup(state: DeclarationParserState, stopToken: string | un
       }
     }
 
-    positional.push({
-      kind: nameToken.value === "_" ? "unnamed" : "named",
-      name: nameToken.value === "_" ? undefined : nameToken.value,
-      optional
-    });
+    positional.push(new PositionalArgDecl(
+      nameToken.value === "_" ? "unnamed" : "named",
+      optional,
+      nameToken.value === "_" ? undefined : nameToken.value
+    ));
   }
 
-  return {
-    positional,
-    keyedClauses,
-    vararg,
-    ...(block !== undefined ? { block } : {})
-  };
+  return Object.assign(new ArgDeclGroup(positional, keyedClauses, vararg), block !== undefined ? { block } : {});
 }
 
 function collectGlobalKeywords(group: ArgDeclGroup, keywords: Set<string>): void {
@@ -401,12 +410,7 @@ function parseTrailingStatementBlocks(tokens: Token[], fromIndex: number): {
       blockStartIndex = possibleNameIndex;
     }
 
-    blocks.unshift({
-      name: blockName,
-      required: true,
-      allowMultiple: false,
-      ...(languageName !== undefined ? { languageName } : {})
-    });
+    blocks.unshift(new StatementBlockDecl(blockName, true, false, languageName));
 
     endExclusive = blockStartIndex;
   }
@@ -432,7 +436,7 @@ export function parseStatementDeclaration(tokens: Token[]): StatementDeclaration
 
     consumeNonIgnorable(state);
     consumeNonIgnorable(state);
-    qualifiers.push({ keyword: keyword.value });
+    qualifiers.push(new QualifierDecl(keyword.value));
   }
 
   const commandNameToken = consumeNonIgnorable(state);
@@ -448,23 +452,12 @@ export function parseStatementDeclaration(tokens: Token[]): StatementDeclaration
     throw new Error("Unexpected content after statement block");
   }
 
-  const argDecls: ArgDeclGroup = {
-    positional: parsedArgDecls.positional,
-    keyedClauses: parsedArgDecls.keyedClauses,
-    ...(parsedArgDecls.vararg ? { vararg: parsedArgDecls.vararg } : {})
-  };
+  const argDecls = new ArgDeclGroup(parsedArgDecls.positional, parsedArgDecls.keyedClauses, parsedArgDecls.vararg);
 
   const globalKeywords = new Set<string>();
   collectGlobalKeywords(argDecls, globalKeywords);
 
-  return {
-    name: commandNameToken.value,
-    argumentOperatorSetName,
-    qualifiers,
-    argDecls,
-    blocks: split.blocks,
-    globalKeywords
-  };
+  return new StatementDeclaration(commandNameToken.value, qualifiers, argDecls, split.blocks, globalKeywords, argumentOperatorSetName);
 }
 
 export function validateDeclaration(decl: StatementDeclaration, existingCommandNames: Set<string>): void {

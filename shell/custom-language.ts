@@ -3,9 +3,11 @@ import {
   cloneOperatorSet,
   cloneStatementSet,
   createLanguage,
+  StatementArgumentDefinition,
+  StatementBlockDefinition,
+  StatementDefinition,
   type Language,
   type OperatorSetDefinition,
-  type StatementDefinition,
   type StatementSetDefinition
 } from "../parser/index.js";
 import { expressionConfig } from "../lang/expression-config.js";
@@ -15,58 +17,58 @@ export const SHELL_STATEMENT_SET_NAME = "shell_statements";
 export const SHELL_LANGUAGE_NAME = "shell";
 
 export const shellStatementDefinitions: Record<string, StatementDefinition> = {
-  cd: {
-    parts: [{ kind: "argument", name: "path", valueKind: "raw", positional: true, vararg: true }]
-  },
-  cmd: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  eval: {
-    parts: [{ kind: "argument", name: "expression", valueKind: "expression", positional: true }]
-  },
-  echo: {
-    parts: [{ kind: "argument", name: "extras", valueKind: "raw", positional: true, vararg: true }]
-  },
-  for: {
+  cd: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "path", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  cmd: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  eval: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "expression", valueKind: "expression", positional: true })]
+  }),
+  echo: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "extras", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  for: new StatementDefinition({
     parts: [
-      { kind: "argument", name: "iterator", valueKind: "expression", positional: true },
-      { kind: "argument", name: "from", valueKind: "expression" },
-      { kind: "argument", name: "to", valueKind: "expression" },
-      { kind: "argument", name: "step", valueKind: "expression", optional: true },
-      { kind: "block", name: "do" }
+      new StatementArgumentDefinition({ name: "iterator", valueKind: "expression", positional: true }),
+      new StatementArgumentDefinition({ name: "from", valueKind: "expression" }),
+      new StatementArgumentDefinition({ name: "to", valueKind: "expression" }),
+      new StatementArgumentDefinition({ name: "step", valueKind: "expression", optional: true }),
+      new StatementBlockDefinition({ name: "do" })
     ]
-  },
-  func: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  if: {
+  }),
+  func: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  if: new StatementDefinition({
     parts: [
-      { kind: "argument", name: "condition", valueKind: "expression", positional: true },
-      { kind: "block", name: "then" },
-      { kind: "block", name: "else", optional: true }
+      new StatementArgumentDefinition({ name: "condition", valueKind: "expression", positional: true }),
+      new StatementBlockDefinition({ name: "then" }),
+      new StatementBlockDefinition({ name: "else", optional: true })
     ]
-  },
-  language: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  operators: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  raw: {
-    parts: [{ kind: "argument", name: "text", valueKind: "raw", positional: true, vararg: true }]
-  },
-  statements: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  stmt: {
-    parts: [{ kind: "argument", name: "declaration", valueKind: "raw", positional: true, vararg: true }]
-  },
-  while: {
+  }),
+  language: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  operators: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  raw: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "text", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  statements: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  stmt: new StatementDefinition({
+    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
+  }),
+  while: new StatementDefinition({
     parts: [
-      { kind: "argument", name: "condition", valueKind: "expression", positional: true },
-      { kind: "block", name: "do" }
+      new StatementArgumentDefinition({ name: "condition", valueKind: "expression", positional: true }),
+      new StatementBlockDefinition({ name: "do" })
     ]
-  }
+  })
 };
 
 export const shellOperatorSet: OperatorSetDefinition = {

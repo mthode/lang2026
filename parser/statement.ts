@@ -6,17 +6,18 @@ import {
   isIgnorable,
   parseExpressionFromTokens,
   withParserErrorContext,
+  ExpressionParserConfig,
   type ExpressionNode,
   type ExpressionOperatorOverrides,
-  type ExpressionParserConfig,
   type InfixOperatorDefinition,
   type PrefixOperatorDefinition
 } from "./expression.js";
 import { toParserConfig, type Language } from "./language.js";
 
-export interface NestedBlockNode {
-  kind: "nested-block";
-  content: string;
+export class NestedBlockNode {
+  readonly kind = "nested-block";
+
+  constructor(readonly content: string) {}
 }
 
 export type ArgumentValue = ExpressionNode | string | NestedBlockNode;
@@ -24,34 +25,42 @@ export type StatementArguments = Record<string, ArgumentValue | ArgumentValue[]>
 export type StatementBlocks = Record<string, NestedBlockNode | NestedBlockNode[]>;
 export type StatementClauses = Record<string, ParsedStatementClause[]>;
 
-export interface ParsedStatementClause {
-  args: StatementArguments;
-  blocks: StatementBlocks;
-  clauses: StatementClauses;
+export class ParsedStatementClause {
+  constructor(
+    readonly args: StatementArguments,
+    readonly blocks: StatementBlocks,
+    readonly clauses: StatementClauses
+  ) {}
 }
 
-export interface NamedStatementNode {
-  kind: "statement";
-  name: string;
-  args: StatementArguments;
-  blocks: StatementBlocks;
-  qualifiers?: Record<string, boolean>;
-  clauses?: StatementClauses;
-  raw: string;
+export class NamedStatementNode {
+  readonly kind = "statement";
+
+  constructor(
+    readonly name: string,
+    readonly args: StatementArguments,
+    readonly blocks: StatementBlocks,
+    readonly raw: string,
+    readonly qualifiers?: Record<string, boolean>,
+    readonly clauses?: StatementClauses
+  ) {}
 }
 
-export interface AssignmentStatementNode {
-  kind: "assignment";
-  name: string;
-  value: ExpressionNode;
-  raw: string;
+export class AssignmentStatementNode {
+  readonly kind = "assignment";
+
+  constructor(
+    readonly name: string,
+    readonly value: ExpressionNode,
+    readonly raw: string
+  ) {}
 }
 
 export type StatementNode = NamedStatementNode | AssignmentStatementNode;
 
 export type StatementArgumentKind = "expression" | "raw";
 
-export interface StatementDefinition {
+export class StatementDefinition {
   parts?: StatementPartDefinition[];
   qualifiers?: StatementQualifierDefinition[];
   allowExtraArguments?: boolean;
@@ -59,43 +68,59 @@ export interface StatementDefinition {
   parseNamedArguments?: boolean;
   consumeRestAsSingleArgument?: boolean;
   argumentExpressionOperators?: ExpressionOperatorOverrides;
+
+  constructor(definition: StatementDefinition = {}) {
+    Object.assign(this, definition);
+  }
 }
 
-export interface StatementQualifierDefinition {
-  keyword: string;
+export class StatementQualifierDefinition {
+  constructor(readonly keyword: string) {}
 }
 
-export interface StatementArgumentDefinition {
-  kind: "argument";
-  name: string;
-  valueKind: StatementArgumentKind;
+export class StatementArgumentDefinition {
+  readonly kind = "argument";
+  name!: string;
+  valueKind!: StatementArgumentKind;
   positional?: boolean;
   optional?: boolean;
   vararg?: boolean;
   trailingNamedArguments?: string[];
   expressionOperators?: ExpressionOperatorOverrides;
+
+  constructor(definition: Omit<StatementArgumentDefinition, "kind">) {
+    Object.assign(this, definition);
+  }
 }
 
-export interface StatementBlockDefinition {
-  kind: "block";
-  name: string;
+export class StatementBlockDefinition {
+  readonly kind = "block";
+  name!: string;
   positional?: boolean;
   optional?: boolean;
   vararg?: boolean;
   languageName?: string;
+
+  constructor(definition: Omit<StatementBlockDefinition, "kind">) {
+    Object.assign(this, definition);
+  }
 }
 
-export interface StatementClauseBlockDefinition {
-  languageName?: string;
+export class StatementClauseBlockDefinition {
+  constructor(readonly languageName?: string) {}
 }
 
-export interface StatementClauseDefinition {
-  kind: "clause";
-  name: string;
+export class StatementClauseDefinition {
+  readonly kind = "clause";
+  name!: string;
   optional?: boolean;
   vararg?: boolean;
   parts?: StatementPartDefinition[];
   block?: StatementClauseBlockDefinition;
+
+  constructor(definition: Omit<StatementClauseDefinition, "kind">) {
+    Object.assign(this, definition);
+  }
 }
 
 export type StatementPartDefinition = StatementArgumentDefinition | StatementBlockDefinition | StatementClauseDefinition;
@@ -157,11 +182,19 @@ export class PartInfo {
   }
 }
 
-export interface ParserConfig extends ExpressionParserConfig {
+export class ParserConfig extends ExpressionParserConfig {
   allowAssignmentStatements?: boolean;
   statements?: Record<string, StatementDefinition>;
   strictStatements?: boolean;
   defaultStatement?: StatementDefinition;
+
+  constructor(config: ParserConfig) {
+    super(config.prefixOperators, config.infixOperators);
+    this.allowAssignmentStatements = config.allowAssignmentStatements;
+    this.statements = config.statements;
+    this.strictStatements = config.strictStatements;
+    this.defaultStatement = config.defaultStatement;
+  }
 }
 
 export interface GenericParser {
@@ -303,7 +336,7 @@ function parseNestedBlockValue(tokens: Token[], from: number): { value: NestedBl
       if (depth === 0) {
         const content = tokens.slice(openIndex + 1, cursor).map((t) => t.value).join("");
         return {
-          value: { kind: "nested-block", content: content.trim() },
+          value: new NestedBlockNode(content.trim()),
           next: cursor + 1
         };
       }
@@ -828,11 +861,7 @@ function parseRichParts(
           index += 1;
         }
 
-        addClause(clauses, part.name, {
-          args: child.args,
-          blocks: clauseBlock,
-          clauses: child.clauses
-        });
+        addClause(clauses, part.name, new ParsedStatementClause(child.args, clauseBlock, child.clauses));
 
         if (part.block && clauseBlock[part.name]) {
           const existing = blocks[part.name];
@@ -959,12 +988,7 @@ export function createParser(config: ParserConfig): GenericParser {
 
       if (statementSegmentIndex === 0 && activeScope.allowAssignmentStatements && compactRemainder[0]?.type === "operator" && compactRemainder[0].value === "=") {
         const value = parseExpressionFromTokens(compactRemainder.slice(1), expressionConfig, startLine);
-        return {
-          kind: "assignment",
-          name,
-          value,
-          raw: line
-        };
+        return new AssignmentStatementNode(name, value, line);
       }
 
       let args: StatementArguments = {};
@@ -1004,15 +1028,14 @@ export function createParser(config: ParserConfig): GenericParser {
         );
       }
 
-      return {
-        kind: "statement",
+      return new NamedStatementNode(
         name,
         args,
         blocks,
-        ...(Object.keys(parsedQualifiers).length > 0 ? { qualifiers: parsedQualifiers } : {}),
-        ...(clauses ? { clauses } : {}),
-        raw: line
-      };
+        line,
+        Object.keys(parsedQualifiers).length > 0 ? parsedQualifiers : undefined,
+        clauses
+      );
     });
   }
 

@@ -1,30 +1,88 @@
 import type { Token } from "../scanner/index.js";
 
 export type ExpressionNode =
-  | { kind: "identifier"; name: string }
-  | { kind: "number"; value: number; raw: string }
-  | { kind: "string"; value: string; raw: string }
-  | { kind: "prefix"; operator: string; right: ExpressionNode }
-  | { kind: "binary"; operator: string; left: ExpressionNode; right: ExpressionNode }
-  | { kind: "call"; callee: ExpressionNode; args: ExpressionNode[] };
+  | IdentifierExpressionNode
+  | NumberExpressionNode
+  | StringExpressionNode
+  | PrefixExpressionNode
+  | BinaryExpressionNode
+  | CallExpressionNode;
 
-export interface PrefixOperatorDefinition {
-  precedence: number;
+export class IdentifierExpressionNode {
+  readonly kind = "identifier";
+
+  constructor(readonly name: string) {}
 }
 
-export interface InfixOperatorDefinition {
-  precedence: number;
-  associativity?: "left" | "right";
+export class NumberExpressionNode {
+  readonly kind = "number";
+
+  constructor(
+    readonly value: number,
+    readonly raw: string
+  ) {}
 }
 
-export interface ExpressionOperatorOverrides {
-  prefixOperators?: Record<string, PrefixOperatorDefinition>;
-  infixOperators?: Record<string, InfixOperatorDefinition>;
+export class StringExpressionNode {
+  readonly kind = "string";
+
+  constructor(
+    readonly value: string,
+    readonly raw: string
+  ) {}
 }
 
-export interface ExpressionParserConfig {
-  prefixOperators: Record<string, PrefixOperatorDefinition>;
-  infixOperators: Record<string, InfixOperatorDefinition>;
+export class PrefixExpressionNode {
+  readonly kind = "prefix";
+
+  constructor(
+    readonly operator: string,
+    readonly right: ExpressionNode
+  ) {}
+}
+
+export class BinaryExpressionNode {
+  readonly kind = "binary";
+
+  constructor(
+    readonly operator: string,
+    readonly left: ExpressionNode,
+    readonly right: ExpressionNode
+  ) {}
+}
+
+export class CallExpressionNode {
+  readonly kind = "call";
+
+  constructor(
+    readonly callee: ExpressionNode,
+    readonly args: ExpressionNode[]
+  ) {}
+}
+
+export class PrefixOperatorDefinition {
+  constructor(readonly precedence: number) {}
+}
+
+export class InfixOperatorDefinition {
+  constructor(
+    readonly precedence: number,
+    readonly associativity?: "left" | "right"
+  ) {}
+}
+
+export class ExpressionOperatorOverrides {
+  constructor(
+    readonly prefixOperators?: Record<string, PrefixOperatorDefinition>,
+    readonly infixOperators?: Record<string, InfixOperatorDefinition>
+  ) {}
+}
+
+export class ExpressionParserConfig {
+  constructor(
+    readonly prefixOperators: Record<string, PrefixOperatorDefinition>,
+    readonly infixOperators: Record<string, InfixOperatorDefinition>
+  ) {}
 }
 
 interface ParserState {
@@ -117,7 +175,7 @@ function parsePrimary(state: ParserState): ExpressionNode {
   }
 
   if (token.type === "identifier") {
-    let node: ExpressionNode = { kind: "identifier", name: token.value };
+    let node: ExpressionNode = new IdentifierExpressionNode(token.value);
 
     while (peek(state)?.value === "(") {
       consume(state);
@@ -138,19 +196,19 @@ function parsePrimary(state: ParserState): ExpressionNode {
         throw createParserError("Expected ')' in call expression", state.lineOffset, peek(state));
       }
       consume(state);
-      node = { kind: "call", callee: node, args };
+      node = new CallExpressionNode(node, args);
     }
 
     return node;
   }
 
   if (token.type === "number") {
-    return { kind: "number", value: Number(token.value.replaceAll("_", "")), raw: token.value };
+    return new NumberExpressionNode(Number(token.value.replaceAll("_", "")), token.value);
   }
 
   if (token.type === "string") {
     const unquoted = token.value.slice(1, Math.max(1, token.value.length - 1));
-    return { kind: "string", value: unquoted, raw: token.value };
+    return new StringExpressionNode(unquoted, token.value);
   }
 
   if (token.value === "(") {
@@ -165,7 +223,7 @@ function parsePrimary(state: ParserState): ExpressionNode {
   const prefixOperator = state.config.prefixOperators[token.value];
   if (prefixOperator) {
     const right = parseExpression(state, prefixOperator.precedence);
-    return { kind: "prefix", operator: token.value, right };
+    return new PrefixExpressionNode(token.value, right);
   }
 
   throw createParserError(`Unexpected token '${token.value}'`, state.lineOffset, token);
@@ -188,7 +246,7 @@ function parseExpression(state: ParserState, minPrecedence = 0): ExpressionNode 
 
     const nextMinPrecedence = infixOperator.associativity === "right" ? infixOperator.precedence : infixOperator.precedence + 1;
     const right = parseExpression(state, nextMinPrecedence);
-    left = { kind: "binary", operator, left, right };
+    left = new BinaryExpressionNode(operator, left, right);
   }
 
   return left;

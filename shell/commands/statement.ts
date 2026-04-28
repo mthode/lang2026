@@ -1,11 +1,17 @@
 import {
   extractNestedBlock,
   resolveNamedOperatorSet,
+  StatementArgumentDefinition,
+  StatementBlockDefinition,
+  StatementClauseBlockDefinition,
+  StatementClauseDefinition,
+  StatementDefinition,
+  StatementQualifierDefinition,
   toExpressionParserConfig
 } from "../../parser/index.js";
 import { isIgnorable } from "../../parser/expression.js";
 import { scan, type Token } from "../../scanner/index.js";
-import type { OperatorSetDefinition, StatementDefinition, StatementPartDefinition } from "../../parser/index.js";
+import type { OperatorSetDefinition, StatementPartDefinition } from "../../parser/index.js";
 import {
   parseStatementDeclaration,
   validateDeclaration,
@@ -75,11 +81,11 @@ export function statementDefinitionFromDeclaration(
     ? toExpressionParserConfig(resolveNamedOperatorSet(operatorSets, declaration.argumentOperatorSetName))
     : undefined;
 
-  return {
+  return new StatementDefinition({
     parts,
-    qualifiers: declaration.qualifiers.map((qualifier) => ({ keyword: qualifier.keyword })),
+    qualifiers: declaration.qualifiers.map((qualifier) => new StatementQualifierDefinition(qualifier.keyword)),
     ...(argumentOperatorSet ? { argumentExpressionOperators: argumentOperatorSet } : {})
-  };
+  });
 }
 
 function appendArgGroupParts(statementName: string, group: ArgDeclGroup, parts: StatementPartDefinition[]): void {
@@ -95,50 +101,46 @@ function appendArgGroupParts(statementName: string, group: ArgDeclGroup, parts: 
     return;
   }
 
-  parts.push({
-    kind: "argument",
+  parts.push(new StatementArgumentDefinition({
     name: "args",
     valueKind: "expression",
     positional: true,
     optional: true,
     vararg: true,
     trailingNamedArguments: group.vararg.trailingNamedArgs
-  });
+  }));
 }
 
 function positionalArgToPart(arg: PositionalArgDecl, index: number): StatementPartDefinition {
-  return {
-    kind: "argument",
+  return new StatementArgumentDefinition({
     name: arg.kind === "named" && arg.name ? arg.name : `arg${index}`,
     valueKind: "expression",
     positional: true,
     optional: arg.optional
-  };
+  });
 }
 
 function keyedClauseToPart(statementName: string, clause: KeyedClauseDecl): StatementPartDefinition {
   const parts: StatementPartDefinition[] = [];
   appendArgGroupParts(statementName, clause.argDecls, parts);
 
-  return {
-    kind: "clause",
+  return new StatementClauseDefinition({
     name: clause.keyword,
     optional: !clause.required,
     vararg: clause.allowMultiple,
     parts,
-    ...(clause.block ? { block: { ...(clause.block.languageName ? { languageName: clause.block.languageName } : {}) } } : {})
-  };
+    ...(clause.block ? { block: new StatementClauseBlockDefinition(clause.block.languageName) } : {})
+  });
 }
 
 function statementBlockToPart(statementName: string, block: StatementBlockDecl): StatementPartDefinition {
-  return {
-    kind: "block",
+  return new StatementBlockDefinition({
     name: block.name,
     positional: block.name === "body",
     optional: !block.required,
     vararg: block.allowMultiple,
     ...(block.languageName ? { languageName: block.languageName } : {})
-  };
+  });
 }
 
 interface StatementDeclarationBlock {

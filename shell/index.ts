@@ -1,6 +1,6 @@
 import { createParser, type NamedStatementNode, type ParserConfig, type Language, type StatementNode } from "../parser/index.js";
 import { splitLogicalLinesWithMetadata } from "../scanner/index.js";
-import type { ReplCallbacks } from "../repl/index.js";
+import { ReplExecutionResult, type ReplCallbacks } from "../repl/index.js";
 import { executeEchoCommand } from "./commands/echo.js";
 import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
@@ -51,9 +51,10 @@ export const parseShellLine = (source: string, startLine?: number, scope?: Langu
 export const parseShellScript = (source: string, scope?: Language) => shellParser.parseScript(source, scope);
 export const formatShellPrompt = (environment: ShellEnvironment): string => `${environment.currentDirectory}> `;
 
-export interface ShellSourceExecutionResult {
-  command?: ShellCommandNode;
-  output?: string;
+export class ShellSourceExecutionResult extends ReplExecutionResult<ShellCommandNode> {
+  constructor(command?: ShellCommandNode, output?: string) {
+    super(command, output);
+  }
 }
 
 export function createShellReplCallbacks(environment: ShellEnvironment): ReplCallbacks<ShellCommandNode> {
@@ -79,10 +80,7 @@ export function executeShellSource(source: string, environment: ShellEnvironment
     }
   }
 
-  return {
-    command: lastCommand,
-    output: outputs.length > 0 ? outputs.join("\n") : undefined
-  };
+  return new ShellSourceExecutionResult(lastCommand, outputs.length > 0 ? outputs.join("\n") : undefined);
 }
 
 export function executeShellCommand(
@@ -114,21 +112,21 @@ export function executeShellCommand(
   return environment.executeOsCommand(statement.name, args);
 }
 
-export interface ShellRuntime {
-  execute(script: string): Promise<void>;
+export class ShellRuntime {
+  constructor(private readonly handler: ShellStatementHandler) {}
+
+  async execute(script: string): Promise<void> {
+    const statements = parseShellScript(script);
+    for (const statement of statements) {
+      await this.handler(statement);
+    }
+  }
 }
 
 export type ShellStatementHandler = (statement: ShellStatementNode) => Promise<void> | void;
 
 export function createShellRuntime(handler: ShellStatementHandler): ShellRuntime {
-  return {
-    async execute(script: string): Promise<void> {
-      const statements = parseShellScript(script);
-      for (const statement of statements) {
-        await handler(statement);
-      }
-    }
-  };
+  return new ShellRuntime(handler);
 }
 
 export { createShellEnvironment };

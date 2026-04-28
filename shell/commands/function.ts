@@ -1,5 +1,5 @@
 import { extractNestedBlock } from "../../parser/index.js";
-import type { LangFunctionDefinition } from "../../lang/types.js";
+import { LangFunctionDefinition } from "../../lang/types.js";
 import type { ShellCommandExecutor } from "./types.js";
 
 export const executeFuncCommand: ShellCommandExecutor = (command, _context, environment) => {
@@ -40,11 +40,7 @@ function parseFunctionDefinition(source: string): LangFunctionDefinition {
   const paramsSource = header.slice(openParen + 1, closeParen).trim();
   const parameters = parseParameters(paramsSource);
 
-  return {
-    name,
-    parameters,
-    body: block.content
-  };
+  return new LangFunctionDefinition(name, parameters, block.content);
 }
 
 function parseParameters(source: string): string[] {

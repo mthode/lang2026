@@ -8,16 +8,33 @@ import type {
 } from "../../parser/index.js";
 import { createShellLanguageRegistries } from "../custom-language.js";
 
-export interface ShellEnvironment extends ExpressionRuntimeEnvironment {
-  commands: Map<string, UserCommandDefinition>;
-  statementDeclarations: Map<string, StatementDefinition>;
-  expressionFunctions: Map<string, LangFunctionDefinition>;
+export class ShellEnvironment implements ExpressionRuntimeEnvironment {
+  variables: Record<string, number> = {};
+  localVariables: Record<string, number> = {};
+  commands = new Map<string, UserCommandDefinition>();
+  statementDeclarations = new Map<string, StatementDefinition>();
+  expressionFunctions = new Map<string, LangFunctionDefinition>();
   operatorSets: Map<string, OperatorSetDefinition>;
   statementSets: Map<string, StatementSetDefinition>;
   languages: Map<string, Language>;
   currentDirectory: string;
-  executeOsCommand(command: string, args: string[]): string | undefined;
-  changeDirectory(path: string, currentDirectory: string): string;
+  executeOsCommand: (command: string, args: string[]) => string | undefined;
+  changeDirectory: (path: string, currentDirectory: string) => string;
+
+  constructor(options: ShellEnvironmentOptions = {}) {
+    const registries = createShellLanguageRegistries();
+
+    this.operatorSets = registries.operatorSets;
+    this.statementSets = registries.statementSets;
+    this.languages = registries.languages;
+    this.currentDirectory = options.currentDirectory ?? "/";
+    this.executeOsCommand = options.executeOsCommand ?? (() => {
+      throw new Error("OS commands are not available on the web");
+    });
+    this.changeDirectory = options.changeDirectory ?? (() => {
+      throw new Error("OS commands are not available on the web");
+    });
+  }
 }
 
 export interface ShellEnvironmentOptions {
@@ -26,34 +43,18 @@ export interface ShellEnvironmentOptions {
   changeDirectory?: (path: string, currentDirectory: string) => string;
 }
 
-export interface UserCommandDefinition {
-  declaration: StatementDeclaration;
-  implementationBody: string;
-  bodyLanguageName?: string;
-  argumentOperatorSet?: OperatorSetDefinition;
-  bodyLanguage?: Language;
+export class UserCommandDefinition {
+  constructor(
+    readonly declaration: StatementDeclaration,
+    readonly implementationBody: string,
+    readonly bodyLanguageName?: string,
+    readonly argumentOperatorSet?: OperatorSetDefinition,
+    readonly bodyLanguage?: Language
+  ) {}
 }
 
 export function createShellEnvironment(options: ShellEnvironmentOptions = {}): ShellEnvironment {
-  const registries = createShellLanguageRegistries();
-
-  return {
-    variables: {},
-    localVariables: {},
-    commands: new Map(),
-    statementDeclarations: new Map(),
-    expressionFunctions: new Map(),
-    operatorSets: registries.operatorSets,
-    statementSets: registries.statementSets,
-    languages: registries.languages,
-    currentDirectory: options.currentDirectory ?? "/",
-    executeOsCommand: options.executeOsCommand ?? (() => {
-      throw new Error("OS commands are not available on the web");
-    }),
-    changeDirectory: options.changeDirectory ?? (() => {
-      throw new Error("OS commands are not available on the web");
-    })
-  };
+  return new ShellEnvironment(options);
 }
 
 export interface ShellCommandContext {

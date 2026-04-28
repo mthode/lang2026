@@ -1,8 +1,10 @@
 import { scan } from "../scanner/index.js";
 
-export interface ReplExecutionResult<TCommand = unknown> {
-  command?: TCommand;
-  output?: string;
+export class ReplExecutionResult<TCommand = unknown> {
+  constructor(
+    readonly command?: TCommand,
+    readonly output?: string
+  ) {}
 }
 
 export interface ReplCallbacks<TCommand = unknown> {
@@ -10,8 +12,14 @@ export interface ReplCallbacks<TCommand = unknown> {
   needsContinuation?(input: string): boolean;
 }
 
-export interface ReplResult<TCommand = unknown> extends ReplExecutionResult<TCommand> {
-  pending: boolean;
+export class ReplResult<TCommand = unknown> extends ReplExecutionResult<TCommand> {
+  constructor(
+    readonly pending: boolean,
+    command?: TCommand,
+    output?: string
+  ) {
+    super(command, output);
+  }
 }
 
 export class ReplEngine<TCommand = unknown> {
@@ -79,7 +87,7 @@ export class ReplEngine<TCommand = unknown> {
 
     const continuationChecker = this.callbacks.needsContinuation ?? needsContinuation;
     if (continuationChecker(this.pendingInput)) {
-      return { pending: true };
+      return new ReplResult<TCommand>(true);
     }
 
     const source = this.pendingInput;
@@ -89,11 +97,7 @@ export class ReplEngine<TCommand = unknown> {
 
     const result = await this.callbacks.execute(source);
 
-    return {
-      command: result.command,
-      output: result.output,
-      pending: false
-    };
+    return new ReplResult(false, result.command, result.output);
   }
 }
 

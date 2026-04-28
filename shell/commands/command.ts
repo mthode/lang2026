@@ -10,11 +10,11 @@ import { renderTemplateVariables, stringifyExpression } from "../../lang/express
 import { isIgnorable } from "../../parser/expression.js";
 import { scan, type Token } from "../../scanner/index.js";
 import { executeBodyStatements } from "../utils/body.js";
-import type {
-  ShellCommandContext,
-  ShellCommandExecutor,
-  ShellEnvironment,
-  UserCommandDefinition
+import {
+  UserCommandDefinition,
+  type ShellCommandContext,
+  type ShellCommandExecutor,
+  type ShellEnvironment
 } from "./types.js";
 
 export const executeCmdCommand: ShellCommandExecutor = (command, _context, environment) => {
@@ -38,13 +38,16 @@ export const executeCmdCommand: ShellCommandExecutor = (command, _context, envir
     : undefined;
 
   validateDeclaration(declaration, new Set(environment.commands.keys()));
-  environment.commands.set(declaration.name, {
-    declaration,
-    implementationBody: implementationBlock.content,
-    ...(implementationBlock.languageName ? { bodyLanguageName: implementationBlock.languageName } : {}),
-    argumentOperatorSet,
-    bodyLanguage
-  });
+  environment.commands.set(
+    declaration.name,
+    new UserCommandDefinition(
+      declaration,
+      implementationBlock.content,
+      implementationBlock.languageName,
+      argumentOperatorSet,
+      bodyLanguage
+    )
+  );
   return undefined;
 };
 

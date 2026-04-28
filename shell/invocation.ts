@@ -1,11 +1,11 @@
 import type { Token } from "../scanner/index.js";
-import { extractNestedBlock, type ArgumentValue, type NestedBlockNode } from "../parser/statement.js";
+import { extractNestedBlock, NestedBlockNode, type ArgumentValue } from "../parser/statement.js";
 import {
   isIgnorable,
   parseExpressionFromTokens,
   type ExpressionParserConfig
 } from "../parser/expression.js";
-import type { ArgDeclGroup, ClauseBlockDecl, ParsedArguments, ParsedStatement, StatementDeclaration } from "./declaration.js";
+import { ParsedArguments, ParsedStatement, type ArgDeclGroup, type ClauseBlockDecl, type StatementDeclaration } from "./declaration.js";
 
 interface ClauseParseState {
   parsed: ParsedArguments;
@@ -78,12 +78,7 @@ function findChildClause(group: ArgDeclGroup, keyword: string) {
 
 function createClauseState(clauseName: string): ClauseParseState {
   return {
-    parsed: {
-      clauseName,
-      namedArgs: {},
-      varArgs: [],
-      clauses: {}
-    },
+    parsed: new ParsedArguments(clauseName, {}, [], {}),
     positionalIndex: 0,
     postVarargValues: []
   };
@@ -260,10 +255,7 @@ function parseNestedBlockSegment(
     throw new Error(`Unexpected content after nested block for clause '${clauseName}'`);
   }
 
-  return {
-    kind: "nested-block",
-    content: block.content
-  };
+  return new NestedBlockNode(block.content);
 }
 
 function addParsedBlock(blocks: ParsedBlocks, name: string, block: NestedBlockNode): void {
@@ -397,12 +389,7 @@ export function parseInvocation(
     throw new Error(`Too many positional arguments in invocation of '${decl.name}'`);
   }
 
-  return {
-    statementName: decl.name,
-    qualifiers,
-    arguments: root.parsed,
-    blocks: root.blocks
-  };
+  return new ParsedStatement(decl.name, qualifiers, root.parsed, root.blocks);
 }
 
 export function validateInvocation(result: ParsedStatement, decl: StatementDeclaration): void {

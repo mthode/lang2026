@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { createParser } from "../parser/index.js";
+import {
+  AssignmentStatementNode,
+  BinaryExpressionNode,
+  Language,
+  NamedStatementNode,
+  NestedBlockNode,
+  OperatorSetDefinition,
+  StatementSetDefinition,
+  createParser
+} from "../parser/index.js";
 import { parseShellLine, parseShellScript } from "../shell/index.js";
-import { parseStatementDeclaration } from "../shell/declaration.js";
-import { scan } from "../scanner/index.js";
+import { ParsedStatement, StatementDeclaration, parseStatementDeclaration } from "../shell/declaration.js";
+import { Token, scan } from "../scanner/index.js";
 import { validateDeclaration } from "../shell/declaration.js";
 import { parseInvocation, validateInvocation } from "../shell/invocation.js";
 import { createLanguage, toExpressionParserConfig, toParserConfig, toStatementParserDefinition } from "../parser/language.js";
-import type { Language, OperatorSetDefinition, StatementSetDefinition } from "../parser/index.js";
+import { ShellEnvironment, UserCommandDefinition } from "../shell/commands/types.js";
 
 describe("parser", () => {
   const parser = createParser({
@@ -27,6 +36,7 @@ describe("parser", () => {
   it("parses command name and arguments", () => {
     const command = parser.parseLine("echo hello");
     expect(command.kind).toBe("statement");
+    expect(command).toBeInstanceOf(NamedStatementNode);
     if (command.kind !== "statement") throw new Error("expected statement");
     expect(command.name).toBe("echo");
     expect(Object.keys(command.args)).toHaveLength(1);
@@ -36,6 +46,7 @@ describe("parser", () => {
   it("parses assignment statements", () => {
     const statement = parser.parseLine("set = 1 + 2");
     expect(statement.kind).toBe("assignment");
+    expect(statement).toBeInstanceOf(AssignmentStatementNode);
     if (statement.kind !== "assignment") throw new Error("expected assignment");
     expect(statement.name).toBe("set");
     expect(statement.value.kind).toBe("binary");
@@ -75,6 +86,7 @@ describe("parser", () => {
     expect(typeof value).not.toBe("string");
     expect(Array.isArray(value)).toBe(false);
     expect(value && typeof value === "object" && "kind" in value ? value.kind : "").toBe("nested-block");
+    expect(value).toBeInstanceOf(NestedBlockNode);
 
     if (value && typeof value === "object" && "kind" in value && value.kind === "nested-block") {
       expect(value.content).toBe("echo hello");
@@ -165,6 +177,30 @@ describe("parser", () => {
     expect(operatorSet.prefixOperators["+"]).toBeUndefined();
     expect(statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
     expect(language.statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
+    expect(language).toBeInstanceOf(Language);
+    expect(new OperatorSetDefinition(operatorSet)).toBeInstanceOf(OperatorSetDefinition);
+    expect(new StatementSetDefinition(statementSet)).toBeInstanceOf(StatementSetDefinition);
+  });
+
+  it("constructs scanner, expression, shell declaration, and environment values as classes", () => {
+    const [token] = scan("eval 1 + 2");
+    expect(token).toBeInstanceOf(Token);
+
+    const parsed = parser.parseLine("set = 1 + 2");
+    expect(parsed.kind).toBe("assignment");
+    if (parsed.kind !== "assignment") throw new Error("expected assignment");
+    expect(parsed.value).toBeInstanceOf(BinaryExpressionNode);
+
+    const declarationTokens = scan("cmd noop { echo hi }").slice(1);
+    const declaration = parseStatementDeclaration(declarationTokens);
+    expect(declaration).toBeInstanceOf(StatementDeclaration);
+
+    const invocation = parseInvocation(scan("noop"), declaration);
+    expect(invocation).toBeInstanceOf(ParsedStatement);
+
+    const environment = new ShellEnvironment();
+    expect(environment).toBeInstanceOf(ShellEnvironment);
+    expect(new UserCommandDefinition(declaration, "echo hi")).toBeInstanceOf(UserCommandDefinition);
   });
 
   it("includes line and column for token-specific parse errors", () => {
