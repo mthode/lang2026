@@ -123,6 +123,193 @@ Two parser-owned helpers are useful for higher-level runtimes layered on top of 
 - `extractNestedBlock(source, fromIndex?)`: find a balanced `{ ... }` region and return its content plus source indexes
 - `getStatementArgumentSource(line)`: strip the leading statement name and return the remainder of the source line
 
+## Class diagram
+
+This diagram is structural rather than exhaustive. It uses `ExpressionNode`, `StatementNode`, and `StatementPartDefinition` as conceptual hubs for the exported union types, then shows the concrete classes that hang off those hubs.
+
+```mermaid
+classDiagram
+	direction LR
+
+	class ExpressionNode["ExpressionNode (type alias)"]
+	class StatementNode["StatementNode (type alias)"]
+	class StatementPartDefinition["StatementPartDefinition (type alias)"]
+
+	ExpressionNode <|-- IdentifierExpressionNode
+	ExpressionNode <|-- NumberExpressionNode
+	ExpressionNode <|-- StringExpressionNode
+	ExpressionNode <|-- PrefixExpressionNode
+	ExpressionNode <|-- InfixExpressionNode
+	ExpressionNode <|-- CallExpressionNode
+
+	StatementNode <|-- NamedStatementNode
+	StatementNode <|-- AssignmentStatementNode
+
+	StatementPartDefinition <|-- StatementArgumentDefinition
+	StatementPartDefinition <|-- StatementBlockDefinition
+	StatementPartDefinition <|-- StatementClauseDefinition
+
+	ExpressionParserConfig <|-- ParserConfig
+
+	class IdentifierExpressionNode {
+		+name
+	}
+	class NumberExpressionNode {
+		+value
+		+raw
+	}
+	class StringExpressionNode {
+		+value
+		+raw
+	}
+	class PrefixExpressionNode {
+		+operator
+		+right
+	}
+	class InfixExpressionNode {
+		+operator
+		+left
+		+right
+	}
+	class CallExpressionNode {
+		+callee
+		+args
+	}
+	class PrefixOperatorDefinition {
+		+precedence
+	}
+	class InfixOperatorDefinition {
+		+precedence
+		+associativity
+	}
+	class ExpressionOperatorOverrides {
+		+prefixOperators
+		+infixOperators
+	}
+	class ExpressionParserConfig {
+		+prefixOperators
+		+infixOperators
+	}
+	class NestedBlockNode {
+		+content
+	}
+	class ParsedStatementClause {
+		+args
+		+blocks
+		+clauses
+	}
+	class NamedStatementNode {
+		+name
+		+args
+		+blocks
+		+raw
+		+qualifiers
+		+clauses
+	}
+	class AssignmentStatementNode {
+		+name
+		+value
+		+raw
+	}
+	class StatementDefinition {
+		+parts
+		+qualifiers
+		+allowExtraArguments
+		+argumentKind
+		+parseNamedArguments
+		+consumeRestAsSingleArgument
+		+argumentExpressionOperators
+	}
+	class StatementQualifierDefinition {
+		+keyword
+	}
+	class StatementArgumentDefinition {
+		+name
+		+valueKind
+		+positional
+		+optional
+		+vararg
+		+trailingNamedArguments
+		+expressionOperators
+	}
+	class StatementBlockDefinition {
+		+name
+		+positional
+		+optional
+		+vararg
+		+languageName
+	}
+	class StatementClauseBlockDefinition {
+		+languageName
+	}
+	class StatementClauseDefinition {
+		+name
+		+optional
+		+vararg
+		+parts
+		+block
+	}
+	class PartInfo {
+		+kind
+		+name
+		+positional
+		+optional
+		+vararg
+		+valueKind
+		+expressionOperators
+	}
+	class ParserConfig {
+		+allowAssignmentStatements
+		+statements
+		+strictStatements
+		+defaultStatement
+	}
+	class OperatorSetDefinition {
+		+name
+		+prefixOperators
+		+infixOperators
+	}
+	class StatementSetDefinition {
+		+name
+		+statements
+		+defaultStatement
+		+strictStatements
+	}
+	class Language {
+		+statementSet
+		+operatorSet
+		+allowAssignmentStatements
+	}
+
+	PrefixExpressionNode --> ExpressionNode : right
+	InfixExpressionNode --> ExpressionNode : left and right
+	CallExpressionNode --> ExpressionNode : callee and args
+
+	ExpressionOperatorOverrides --> PrefixOperatorDefinition : prefix operators
+	ExpressionOperatorOverrides --> InfixOperatorDefinition : infix operators
+	ExpressionParserConfig --> PrefixOperatorDefinition : prefix operators
+	ExpressionParserConfig --> InfixOperatorDefinition : infix operators
+
+	AssignmentStatementNode --> ExpressionNode : value
+	NamedStatementNode --> ParsedStatementClause : clauses
+	NamedStatementNode --> NestedBlockNode : blocks
+	ParsedStatementClause --> NestedBlockNode : blocks
+
+	StatementDefinition --> StatementQualifierDefinition : qualifiers
+	StatementDefinition --> StatementPartDefinition : parts
+	StatementDefinition --> ExpressionOperatorOverrides : argument operators
+	StatementArgumentDefinition --> ExpressionOperatorOverrides : part operators
+	StatementClauseDefinition --> StatementPartDefinition : nested parts
+	StatementClauseDefinition --> StatementClauseBlockDefinition : block metadata
+	PartInfo --> StatementPartDefinition : derived from
+
+	OperatorSetDefinition --> PrefixOperatorDefinition : prefix operators
+	OperatorSetDefinition --> InfixOperatorDefinition : infix operators
+	StatementSetDefinition --> StatementDefinition : statements
+	Language --> OperatorSetDefinition : operator set
+	Language --> StatementSetDefinition : statement set
+```
+
 ## Minimal example
 
 ```ts

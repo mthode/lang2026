@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AssignmentStatementNode,
-  BinaryExpressionNode,
+  InfixExpressionNode,
   Language,
   NamedStatementNode,
   NestedBlockNode,
@@ -189,7 +189,7 @@ describe("parser", () => {
     const parsed = parser.parseLine("set = 1 + 2");
     expect(parsed.kind).toBe("assignment");
     if (parsed.kind !== "assignment") throw new Error("expected assignment");
-    expect(parsed.value).toBeInstanceOf(BinaryExpressionNode);
+    expect(parsed.value).toBeInstanceOf(InfixExpressionNode);
 
     const declarationTokens = scan("cmd noop { echo hi }").slice(1);
     const declaration = parseStatementDeclaration(declarationTokens);

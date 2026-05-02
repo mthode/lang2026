@@ -5,7 +5,7 @@ export type ExpressionNode =
   | NumberExpressionNode
   | StringExpressionNode
   | PrefixExpressionNode
-  | BinaryExpressionNode
+  | InfixExpressionNode
   | CallExpressionNode;
 
 export class IdentifierExpressionNode {
@@ -41,7 +41,7 @@ export class PrefixExpressionNode {
   ) {}
 }
 
-export class BinaryExpressionNode {
+export class InfixExpressionNode {
   readonly kind = "binary";
 
   constructor(
@@ -246,7 +246,7 @@ function parseExpression(state: ParserState, minPrecedence = 0): ExpressionNode 
 
     const nextMinPrecedence = infixOperator.associativity === "right" ? infixOperator.precedence : infixOperator.precedence + 1;
     const right = parseExpression(state, nextMinPrecedence);
-    left = new BinaryExpressionNode(operator, left, right);
+    left = new InfixExpressionNode(operator, left, right);
   }
 
   return left;
