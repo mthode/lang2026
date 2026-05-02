@@ -1,50 +1,23 @@
 # lang2026
 
-A TypeScript project for a line-based command language with:
+A TypeScript project for building line-based languages and runtimes in TypeScript.
+
+The current repository includes:
 
 - `scanner/` tokenization
 - `parser/` line + expression parsing to AST
 - `lang/` expression and function-statement evaluation
 - `repl/` shared REPL engine
-- `shell/` script execution runtime
+- `shell/` shell-style script execution runtime
 - `terminal/` node terminal integration
 - `browser/` browser integration
 - `test/` scanner/parser tests
 
-## Custom Language Declarations
+## Documentation
 
-The shell can now declare named language objects and attach them to user-defined commands.
-
-Minimal first-release forms:
-
-```text
-operators math_ops {
-	infix + precedence 7 left
-}
-
-statements eval_only {
-	eval
-}
-
-language eval_lang statements eval_only operators shell_ops
-
-cmd --evaluate math_ops calc value {
-	eval $value
-} :: eval_lang
-
-calc 1 + 2
-```
-
-Current constraints:
-
-- `operators` supports `prefix` and `infix` entries only.
-- `stmt` registers parser-level statement shapes. It does not create an executable command.
-- `statements` supports direct membership of built-in shell statements and registered `stmt` names.
-- `language` references one named statement set and one named operator set.
-- `cmd --evaluate Name` selects the operator set used to parse invocation arguments.
-- `} :: Name` selects the language used to parse and execute the command body.
-- Custom statements included through `stmt` are parse-only today. Executing one falls through normal shell command resolution unless a runtime handler is added later.
-- `stmt` declarations are lowered into parser-owned `StatementDefinition` values, including qualifiers, selected argument operator sets, keyed clauses, invocation blocks, block language metadata, nested clauses, repeated clauses, and vararg trailing names.
+- [parser/README.md](parser/README.md): reusable parser interfaces, AST shapes, and language composition helpers
+- [shell/README.md](shell/README.md): shell runtime behavior and built-in command syntax
+- [lang/README.md](lang/README.md): expression runtime and function-body semantics
 
 ## Quick start
 
