@@ -17,37 +17,29 @@ export class OperatorSetDefinition {
   }
 }
 
-export class StatementSetDefinition {
+export class Language {
   name?: string;
   statements: Record<string, StatementDefinition>;
   defaultStatement?: StatementDefinition;
   strictStatements?: boolean;
-
-  constructor(definition: StatementSetDefinition) {
-    this.name = definition.name;
-    this.statements = definition.statements;
-    this.defaultStatement = definition.defaultStatement;
-    this.strictStatements = definition.strictStatements;
-  }
-}
-
-export class Language {
-  statementSet: StatementSetDefinition;
   operatorSet: OperatorSetDefinition;
   allowAssignmentStatements?: boolean;
 
   constructor(
-    parts: Pick<Language, "statementSet" | "operatorSet">,
+    parts: Pick<Language, "operatorSet" | "statements"> & Partial<Pick<Language, "name" | "defaultStatement" | "strictStatements">>,
     overrides: Partial<Pick<Language, "allowAssignmentStatements">> = {}
   ) {
+    this.name = parts.name;
     this.operatorSet = cloneOperatorSet(parts.operatorSet);
-    this.statementSet = cloneStatementSet(parts.statementSet);
+    this.statements = cloneStatementDefinitions(parts.statements);
+    this.defaultStatement = parts.defaultStatement ? cloneStatementDefinition(parts.defaultStatement) : undefined;
+    this.strictStatements = parts.strictStatements;
     this.allowAssignmentStatements = overrides.allowAssignmentStatements;
   }
 }
 
 export function createLanguage(
-  parts: Pick<Language, "statementSet" | "operatorSet">,
+  parts: Pick<Language, "operatorSet" | "statements"> & Partial<Pick<Language, "name" | "defaultStatement" | "strictStatements">>,
   overrides: Partial<Pick<Language, "allowAssignmentStatements">> = {}
 ): Language {
   return new Language(parts, overrides);
@@ -61,19 +53,19 @@ export function toExpressionParserConfig(operatorSet: OperatorSetDefinition): Ex
 }
 
 export function toStatementParserDefinition(
-  statementSet: StatementSetDefinition
+  language: Pick<Language, "statements" | "strictStatements" | "defaultStatement">
 ): Pick<ParserConfig, "statements" | "strictStatements" | "defaultStatement"> {
   return {
-    statements: cloneStatementDefinitions(statementSet.statements),
-    strictStatements: statementSet.strictStatements,
-    defaultStatement: statementSet.defaultStatement ? cloneStatementDefinition(statementSet.defaultStatement) : undefined
+    statements: cloneStatementDefinitions(language.statements),
+    strictStatements: language.strictStatements,
+    defaultStatement: language.defaultStatement ? cloneStatementDefinition(language.defaultStatement) : undefined
   };
 }
 
 export function toParserConfig(language: Language): ParserConfig {
   return new ParserConfig({
     ...toExpressionParserConfig(language.operatorSet),
-    ...toStatementParserDefinition(language.statementSet),
+    ...toStatementParserDefinition(language),
     ...(language.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: language.allowAssignmentStatements }
       : {})
@@ -92,18 +84,6 @@ export function resolveNamedOperatorSet(
   return cloneOperatorSet(definition);
 }
 
-export function resolveNamedStatementSet(
-  registry: ReadonlyMap<string, StatementSetDefinition>,
-  name: string
-): StatementSetDefinition {
-  const definition = registry.get(name);
-  if (!definition) {
-    throw new Error(`Unknown statement set '${name}'`);
-  }
-
-  return cloneStatementSet(definition);
-}
-
 export function resolveNamedLanguage(
   registry: ReadonlyMap<string, Language>,
   name: string
@@ -119,8 +99,11 @@ export function resolveNamedLanguage(
 export function cloneLanguage(definition: Language): Language {
   return new Language(
     {
+      name: definition.name,
       operatorSet: cloneOperatorSet(definition.operatorSet),
-      statementSet: cloneStatementSet(definition.statementSet)
+      statements: cloneStatementDefinitions(definition.statements),
+      strictStatements: definition.strictStatements,
+      defaultStatement: definition.defaultStatement ? cloneStatementDefinition(definition.defaultStatement) : undefined
     },
     definition.allowAssignmentStatements !== undefined
       ? { allowAssignmentStatements: definition.allowAssignmentStatements }
@@ -133,15 +116,6 @@ export function cloneOperatorSet(definition: OperatorSetDefinition): OperatorSet
     name: definition.name,
     prefixOperators: { ...definition.prefixOperators },
     infixOperators: { ...definition.infixOperators }
-  });
-}
-
-export function cloneStatementSet(definition: StatementSetDefinition): StatementSetDefinition {
-  return new StatementSetDefinition({
-    name: definition.name,
-    statements: cloneStatementDefinitions(definition.statements),
-    strictStatements: definition.strictStatements,
-    defaultStatement: definition.defaultStatement ? cloneStatementDefinition(definition.defaultStatement) : undefined
   });
 }
 

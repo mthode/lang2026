@@ -2,11 +2,9 @@ operators math_ops {
   infix + precedence 7 left
 }
 
-statements eval_only {
+language eval_lang operators shell_ops {
   eval
 }
-
-language eval_lang statements eval_only operators shell_ops
 
 cmd --evaluate math_ops calc value {
   eval $value

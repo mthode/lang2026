@@ -6,7 +6,6 @@ import {
   NamedStatementNode,
   NestedBlockNode,
   OperatorSetDefinition,
-  StatementSetDefinition,
   createParser
 } from "../parser/index.js";
 import { parseShellLine, parseShellScript } from "../shell/index.js";
@@ -128,7 +127,7 @@ describe("parser", () => {
       }
     };
 
-    const statementSet: StatementSetDefinition = {
+    const languageParts: Pick<Language, "name" | "statements" | "defaultStatement" | "strictStatements"> = {
       name: "math_statements",
       statements: {
         calc: {
@@ -143,14 +142,14 @@ describe("parser", () => {
     };
 
     const language: Language = createLanguage({
-      statementSet,
+      ...languageParts,
       operatorSet
     }, {
       allowAssignmentStatements: true
     });
 
     const expressionConfig = toExpressionParserConfig(operatorSet);
-    const statementConfig = toStatementParserDefinition(statementSet);
+    const statementConfig = toStatementParserDefinition(languageParts);
     const parserConfig = toParserConfig(language);
 
     expect(expressionConfig).toEqual({
@@ -158,16 +157,16 @@ describe("parser", () => {
       infixOperators: operatorSet.infixOperators
     });
     expect(statementConfig).toMatchObject({
-      statements: statementSet.statements,
+      statements: languageParts.statements,
       strictStatements: true,
-      defaultStatement: statementSet.defaultStatement
+      defaultStatement: languageParts.defaultStatement
     });
     expect(parserConfig).toMatchObject({
       prefixOperators: operatorSet.prefixOperators,
       infixOperators: operatorSet.infixOperators,
-      statements: statementSet.statements,
+      statements: languageParts.statements,
       strictStatements: true,
-      defaultStatement: statementSet.defaultStatement,
+      defaultStatement: languageParts.defaultStatement,
       allowAssignmentStatements: true
     });
     expressionConfig.prefixOperators["+"] = { precedence: 5 };
@@ -175,11 +174,10 @@ describe("parser", () => {
     parserConfig.statements!.calc!.parts![0]!.name = "mutated";
 
     expect(operatorSet.prefixOperators["+"]).toBeUndefined();
-    expect(statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
-    expect(language.statementSet.statements.calc?.parts?.[0]?.name).toBe("mutated");
+    expect(languageParts.statements.calc?.parts?.[0]?.name).toBe("mutated");
+    expect(language.statements.calc?.parts?.[0]?.name).toBe("mutated");
     expect(language).toBeInstanceOf(Language);
     expect(new OperatorSetDefinition(operatorSet)).toBeInstanceOf(OperatorSetDefinition);
-    expect(new StatementSetDefinition(statementSet)).toBeInstanceOf(StatementSetDefinition);
   });
 
   it("constructs scanner, expression, shell declaration, and environment values as classes", () => {

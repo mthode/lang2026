@@ -4,12 +4,9 @@ import { createShellEnvironment, executeShellCommand, executeShellSource, parseS
 import {
   SHELL_LANGUAGE_NAME,
   SHELL_OPERATOR_SET_NAME,
-  SHELL_STATEMENT_SET_NAME,
   registerLanguage,
   registerOperatorSet,
-  registerStatementSet,
-  shellLanguage,
-  shellStatementSet
+  shellLanguage
 } from "../shell/custom-language.js";
 
 describe("shell eval command", () => {
@@ -17,17 +14,14 @@ describe("shell eval command", () => {
     const environment = createShellEnvironment();
 
     const operatorSet = environment.operatorSets.get(SHELL_OPERATOR_SET_NAME);
-    const statementSet = environment.statementSets.get(SHELL_STATEMENT_SET_NAME);
     const language = environment.languages.get(SHELL_LANGUAGE_NAME);
 
     expect(operatorSet).toBeDefined();
-    expect(statementSet).toBeDefined();
     expect(language).toBeDefined();
-    expect(statementSet?.statements.echo).toBeDefined();
     expect(language).toMatchObject({
       allowAssignmentStatements: true
     });
-    expect(language?.statementSet.statements.echo).toBeDefined();
+    expect(language?.statements.echo).toBeDefined();
     expect(language?.operatorSet.infixOperators["+"]).toBeDefined();
   });
 
@@ -42,31 +36,18 @@ describe("shell eval command", () => {
     ).toThrowError(`Cannot redefine operator set '${SHELL_OPERATOR_SET_NAME}'`);
 
     expect(() =>
-      registerStatementSet(environment.statementSets, SHELL_STATEMENT_SET_NAME, {
-        statements: {}
-      })
-    ).toThrowError(`Cannot redefine statement set '${SHELL_STATEMENT_SET_NAME}'`);
-
-    expect(() =>
       registerLanguage(environment.languages, SHELL_LANGUAGE_NAME, shellLanguage)
     ).toThrowError(`Cannot redefine language '${SHELL_LANGUAGE_NAME}'`);
   });
 
-  it("declares operator sets, statement sets, and languages", () => {
+  it("declares operator sets and inline-statement languages", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(
         parseShellLine("operators math_ops { prefix ! precedence 9 infix %% precedence 7 left }"),
       environment
     );
-    executeShellCommand(
-        parseShellLine("statements calc_statements { echo eval }"),
-      environment
-    );
-    executeShellCommand(
-        parseShellLine("language calc_lang statements calc_statements operators math_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language calc_lang operators math_ops { echo eval }"), environment);
 
     expect(environment.operatorSets.get("math_ops")).toMatchObject({
       prefixOperators: {
@@ -76,15 +57,8 @@ describe("shell eval command", () => {
         "%%": { precedence: 7, associativity: "left" }
       }
     });
-    expect(environment.statementSets.get("calc_statements")).toMatchObject({
-      strictStatements: true
-    });
-    expect(environment.statementSets.get("calc_statements")?.statements.echo).toBeDefined();
-    expect(environment.statementSets.get("calc_statements")?.statements.eval).toBeDefined();
     expect(environment.languages.get("calc_lang")).toMatchObject({
-      statementSet: {
-        strictStatements: true
-      },
+      strictStatements: true,
       operatorSet: {
         prefixOperators: {
           "!": { precedence: 9 }
@@ -93,7 +67,7 @@ describe("shell eval command", () => {
     });
   });
 
-  it("rejects duplicate operators, statements, and language declarations", () => {
+  it("rejects duplicate operator and language declarations", () => {
     const environment = createShellEnvironment();
 
     expect(() =>
@@ -105,46 +79,39 @@ describe("shell eval command", () => {
 
     expect(() =>
       executeShellCommand(
-        parseShellLine("statements shell_statements { echo }"),
-      environment
-    )
-    ).toThrowError(`Cannot redefine statement set '${SHELL_STATEMENT_SET_NAME}'`);
-
-    expect(() =>
-      executeShellCommand(
-        parseShellLine("language shell statements shell_statements operators shell_ops"),
+        parseShellLine("language shell operators shell_ops { echo }"),
         environment
       )
     ).toThrowError(`Cannot redefine language '${SHELL_LANGUAGE_NAME}'`);
   });
 
-  it("rejects unknown statement references in statement set declarations", () => {
+  it("rejects unknown statement references in language declarations", () => {
     const environment = createShellEnvironment();
 
     expect(() =>
       executeShellCommand(
-        parseShellLine("statements broken_statements { echo missing_statement }"),
+        parseShellLine("language broken_lang operators shell_ops { echo missing_statement }"),
         environment
       )
     ).toThrowError("Unknown statement 'missing_statement'");
   });
 
-  it("rejects unsupported statement set body constructs explicitly", () => {
+  it("rejects unsupported language statement body constructs explicitly", () => {
     const environment = createShellEnvironment();
 
     expect(() =>
       executeShellCommand(
-        parseShellLine("statements composed_statements { import echo }"),
+        parseShellLine("language composed_lang operators shell_ops { import echo }"),
         environment
       )
-    ).toThrowError("Unsupported statement set construct 'import'");
+    ).toThrowError("Unsupported language statement construct 'import'");
 
     expect(() =>
       executeShellCommand(
-        parseShellLine("statements dup_statements { echo echo }"),
+        parseShellLine("language dup_lang operators shell_ops { echo echo }"),
         environment
       )
-    ).toThrowError("Duplicate statement 'echo' in statement set body");
+    ).toThrowError("Duplicate statement 'echo' in language statement body");
   });
 
   it("rejects unsupported operator set body constructs explicitly", () => {
@@ -165,19 +132,12 @@ describe("shell eval command", () => {
     ).toThrowError("Unsupported infix associativity 'center'");
   });
 
-  it("rejects unknown named set references in language declarations", () => {
+  it("rejects unknown named operator references in language declarations", () => {
     const environment = createShellEnvironment();
 
     expect(() =>
       executeShellCommand(
-        parseShellLine("language broken_lang statements missing_statements operators shell_ops"),
-        environment
-      )
-    ).toThrowError("Unknown statement set 'missing_statements'");
-
-    expect(() =>
-      executeShellCommand(
-        parseShellLine("language broken_lang statements shell_statements operators missing_ops"),
+        parseShellLine("language broken_lang operators missing_ops { echo }"),
         environment
       )
     ).toThrowError("Unknown operator set 'missing_ops'");
@@ -325,8 +285,7 @@ describe("shell eval command", () => {
       parseShellLine("stmt --evaluate shell_ops verbose? choose condition (then {} :: then_lang) [else {}]"),
       environment
     );
-    executeShellCommand(parseShellLine("statements rich_shell { choose }"), environment);
-    executeShellCommand(parseShellLine("language rich_lang statements rich_shell operators shell_ops"), environment);
+    executeShellCommand(parseShellLine("language rich_lang operators shell_ops { choose }"), environment);
 
     const definition = environment.statementDeclarations.get("choose");
     expect(definition).toMatchObject({
@@ -356,8 +315,7 @@ describe("shell eval command", () => {
     executeShellCommand(parseShellLine("stmt move (from source (within scope)) (to destination)"), environment);
     executeShellCommand(parseShellLine("stmt match [case value {}]*"), environment);
     executeShellCommand(parseShellLine("stmt cp _ ... destination"), environment);
-    executeShellCommand(parseShellLine("statements rich_statements { move match cp }"), environment);
-    executeShellCommand(parseShellLine("language rich_statements_lang statements rich_statements operators shell_ops"), environment);
+    executeShellCommand(parseShellLine("language rich_statements_lang operators shell_ops { move match cp }"), environment);
 
     const language = environment.languages.get("rich_statements_lang");
     if (!language) throw new Error("expected language");
@@ -386,12 +344,11 @@ describe("shell eval command", () => {
     expect(cp.args.destination).toMatchObject({ kind: "identifier", name: "dst" });
   });
 
-  it("allows stmt declarations in statement sets and custom languages", () => {
+  it("allows stmt declarations in custom languages", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(parseShellLine("stmt choose condition (then {}) [else {}]"), environment);
-    executeShellCommand(parseShellLine("statements mini_shell { echo choose }"), environment);
-    executeShellCommand(parseShellLine("language mini_lang statements mini_shell operators shell_ops"), environment);
+    executeShellCommand(parseShellLine("language mini_lang operators shell_ops { echo choose }"), environment);
 
     const language = environment.languages.get("mini_lang");
     if (!language) throw new Error("expected language");
@@ -418,12 +375,11 @@ describe("shell eval command", () => {
     ).toThrowError("OS commands are not available on the web");
   });
 
-  it("keeps live statement definition references in statement sets and languages", () => {
+  it("keeps live statement definition references in languages", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(parseShellLine("stmt declare name"), environment);
-    executeShellCommand(parseShellLine("statements decl_statements { declare }"), environment);
-    executeShellCommand(parseShellLine("language decl_lang statements decl_statements operators shell_ops"), environment);
+    executeShellCommand(parseShellLine("language decl_lang operators shell_ops { declare }"), environment);
 
     const declaration = environment.statementDeclarations.get("declare");
     if (!declaration?.parts?.[0] || declaration.parts[0].kind !== "argument") {
@@ -445,8 +401,7 @@ describe("shell eval command", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(parseShellLine("stmt choose condition (then {}) [else {}]"), environment);
-    executeShellCommand(parseShellLine("statements mini_shell { choose }"), environment);
-    executeShellCommand(parseShellLine("language mini_lang statements mini_shell operators shell_ops"), environment);
+    executeShellCommand(parseShellLine("language mini_lang operators shell_ops { choose }"), environment);
 
     const language = environment.languages.get("mini_lang");
     if (!language) throw new Error("expected language");
@@ -455,27 +410,27 @@ describe("shell eval command", () => {
     expect(() => executeShellCommand(parsed, environment, language)).toThrowError("OS commands are not available on the web");
   });
 
-  it("rejects duplicate stmt names in statement sets", () => {
+  it("rejects duplicate stmt names in inline language statements", () => {
     const environment = createShellEnvironment();
 
     executeShellCommand(parseShellLine("stmt declare name"), environment);
 
     expect(() =>
-      executeShellCommand(parseShellLine("statements dup_decl { declare declare }"), environment)
-    ).toThrowError("Duplicate statement 'declare' in statement set body");
+      executeShellCommand(parseShellLine("language dup_decl operators shell_ops { declare declare }"), environment)
+    ).toThrowError("Duplicate statement 'declare' in language statement body");
   });
 
-  it("prefers built-in statements over stmt declarations when resolving statement sets", () => {
+  it("prefers built-in statements over stmt declarations when resolving inline language statements", () => {
     const environment = createShellEnvironment();
 
-    const echoDefinition = environment.statementSets.get("shell_statements")?.statements.echo;
+    const echoDefinition = environment.languages.get("shell")?.statements.echo;
     environment.statementDeclarations.set("echo", {
       parts: [{ kind: "argument", name: "renamed", valueKind: "expression", positional: true }]
     });
 
-    executeShellCommand(parseShellLine("statements echo_only { echo }"), environment);
+    executeShellCommand(parseShellLine("language echo_only operators shell_ops { echo }"), environment);
 
-    expect(environment.statementSets.get("echo_only")?.statements.echo).toBe(echoDefinition);
+    expect(environment.languages.get("echo_only")?.statements.echo).toBe(echoDefinition);
   });
 
   it("rejects content-bearing trailing blocks in stmt declarations", () => {
@@ -524,14 +479,7 @@ describe("shell eval command", () => {
   it("executes command bodies in the selected language", () => {
     const environment = createShellEnvironment();
 
-    executeShellCommand(
-      parseShellLine("statements eval_only { eval }"),
-      environment
-    );
-    executeShellCommand(
-      parseShellLine("language eval_lang statements eval_only operators shell_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language eval_lang operators shell_ops { eval }"), environment);
     executeShellCommand(
       parseShellLine("cmd calc value { eval $value } :: eval_lang"),
       environment
@@ -544,14 +492,7 @@ describe("shell eval command", () => {
   it("rejects unsupported commands inside a custom command body language", () => {
     const environment = createShellEnvironment();
 
-    executeShellCommand(
-      parseShellLine("statements eval_only { eval }"),
-      environment
-    );
-    executeShellCommand(
-      parseShellLine("language eval_lang statements eval_only operators shell_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language eval_lang operators shell_ops { eval }"), environment);
     executeShellCommand(
       parseShellLine("cmd broken { echo nope } :: eval_lang"),
       environment
@@ -563,14 +504,7 @@ describe("shell eval command", () => {
   it("inherits the selected language into nested blocks inside command bodies", () => {
     const environment = createShellEnvironment();
 
-    executeShellCommand(
-      parseShellLine("statements if_eval_only { if eval }"),
-      environment
-    );
-    executeShellCommand(
-      parseShellLine("language if_eval_lang statements if_eval_only operators shell_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language if_eval_lang operators shell_ops { if eval }"), environment);
     executeShellCommand(
       parseShellLine("cmd nested { if 1 then { echo nope } } :: if_eval_lang"),
       environment
@@ -586,14 +520,7 @@ describe("shell eval command", () => {
       parseShellLine("operators math_ops { infix %% precedence 7 left }"),
       environment
     );
-    executeShellCommand(
-      parseShellLine("statements eval_only { eval }"),
-      environment
-    );
-    executeShellCommand(
-      parseShellLine("language eval_lang statements eval_only operators math_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language eval_lang operators math_ops { eval }"), environment);
     executeShellCommand(
       parseShellLine("cmd --evaluate math_ops calc { eval 1 %% 2 } :: eval_lang"),
       environment
@@ -606,11 +533,9 @@ describe("shell eval command", () => {
       }
     });
     expect(definition?.bodyLanguage).toMatchObject({
-      statementSet: {
-        strictStatements: true
-      }
+      strictStatements: true
     });
-    expect(definition?.bodyLanguage?.statementSet.statements.eval).toBeDefined();
+    expect(definition?.bodyLanguage?.statements.eval).toBeDefined();
   });
 
   it("rejects unknown named set references when defining commands", () => {
@@ -638,14 +563,7 @@ describe("shell eval command", () => {
       parseShellLine("operators math_ops { infix %% precedence 7 left }"),
       environment
     );
-    executeShellCommand(
-      parseShellLine("statements eval_only { eval }"),
-      environment
-    );
-    executeShellCommand(
-      parseShellLine("language eval_lang statements eval_only operators math_ops"),
-      environment
-    );
+    executeShellCommand(parseShellLine("language eval_lang operators math_ops { eval }"), environment);
     executeShellCommand(
       parseShellLine("cmd --evaluate math_ops calc { eval 1 %% 2 } :: eval_lang"),
       environment
@@ -656,23 +574,21 @@ describe("shell eval command", () => {
       precedence: 7,
       associativity: "left"
     });
-    expect(definition?.bodyLanguage?.statementSet.statements.eval).toBeDefined();
+    expect(definition?.bodyLanguage?.statements.eval).toBeDefined();
 
-    const shellStatements = environment.statementSets.get(SHELL_STATEMENT_SET_NAME);
+    const shellLanguage = environment.languages.get(SHELL_LANGUAGE_NAME);
     const shellOperators = environment.operatorSets.get(SHELL_OPERATOR_SET_NAME);
-    if (!shellStatements || !shellOperators) {
+    if (!shellLanguage || !shellOperators) {
       throw new Error("expected seeded shell language registries");
     }
 
     environment.languages.set(
       "eval_lang",
       createLanguage({
-        statementSet: {
-          statements: {
-            echo: shellStatements.statements.echo!
-          },
-          strictStatements: true
+        statements: {
+          echo: shellLanguage.statements.echo!
         },
+        strictStatements: true,
         operatorSet: shellOperators
       })
     );
@@ -688,8 +604,8 @@ describe("shell eval command", () => {
       associativity: "left"
     });
     expect(definition?.argumentOperatorSet?.infixOperators["@@"]).toBeUndefined();
-    expect(definition?.bodyLanguage?.statementSet.statements.eval).toBeDefined();
-    expect(definition?.bodyLanguage?.statementSet.statements.echo).toBeUndefined();
+    expect(definition?.bodyLanguage?.statements.eval).toBeDefined();
+    expect(definition?.bodyLanguage?.statements.echo).toBeUndefined();
   });
 
   it("supports numeric positional placeholders in user commands", () => {
@@ -807,8 +723,7 @@ describe("shell eval command", () => {
     expect(() =>
       executeShellSource(
         [
-          "statements eval_only { eval }",
-          "language eval_lang statements eval_only operators shell_ops",
+          "language eval_lang operators shell_ops { eval }",
           "cmd broken { echo nope } :: eval_lang",
           "broken"
         ].join("\n"),

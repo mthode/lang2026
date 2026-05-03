@@ -6,7 +6,7 @@ import { executeEvalCommand } from "./commands/eval.js";
 import { executeForCommand } from "./commands/for.js";
 import { executeCdCommand } from "./commands/cd.js";
 import { executeFuncCommand } from "./commands/function.js";
-import { executeLanguageCommand, executeOperatorsCommand, executeStatementsCommand } from "./commands/language-object.js";
+import { executeLanguageCommand, executeOperatorsCommand } from "./commands/language-object.js";
 import { executeCmdCommand, executeUserCommand } from "./commands/command.js";
 import { executeIfCommand } from "./commands/if.js";
 import { executeStmtCommand } from "./commands/statement.js";
@@ -32,7 +32,6 @@ const commandExecutors: Record<string, ShellCommandExecutor> = {
   language: executeLanguageCommand,
   operators: executeOperatorsCommand,
   stmt: executeStmtCommand,
-  statements: executeStatementsCommand,
   while: executeWhileCommand,
   for: executeForCommand
 };

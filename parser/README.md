@@ -10,7 +10,7 @@ The parser scans source internally, so most callers work with parser configs and
 
 - `expression.ts`: expression AST nodes and operator configuration
 - `statement.ts`: statement AST nodes, parser entry points, and statement-shape definitions
-- `language.ts`: reusable named operator sets, statement sets, and parser scopes
+- `language.ts`: reusable named operator sets and parser language scopes
 
 ## Core entry point
 
@@ -96,14 +96,13 @@ Argument and clause values are represented as:
 `language.ts` provides reusable parser building blocks:
 
 - `OperatorSetDefinition`
-- `StatementSetDefinition`
 - `Language`
 - `createLanguage(...)`
 - `toExpressionParserConfig(...)`
 - `toStatementParserDefinition(...)`
 - `toParserConfig(...)`
 
-A host can compose an operator set and a statement set into a `Language`, then either:
+A host can compose an operator set and statement definitions into a `Language`, then either:
 
 - build a parser once with `createParser(toParserConfig(language))`
 - pass a `Language` to `parseLine` or `parseScript` as a per-call override
@@ -111,7 +110,6 @@ A host can compose an operator set and a statement set into a `Language`, then e
 Registry helpers are also exported:
 
 - `resolveNamedOperatorSet(registry, name)`
-- `resolveNamedStatementSet(registry, name)`
 - `resolveNamedLanguage(registry, name)`
 
 Those helpers clone caller-owned definitions when they resolve them, which makes registry reuse safer when hosts allow runtime mutation.
@@ -269,14 +267,11 @@ classDiagram
 		+prefixOperators
 		+infixOperators
 	}
-	class StatementSetDefinition {
+	class Language {
 		+name
 		+statements
 		+defaultStatement
 		+strictStatements
-	}
-	class Language {
-		+statementSet
 		+operatorSet
 		+allowAssignmentStatements
 	}
@@ -305,9 +300,8 @@ classDiagram
 
 	OperatorSetDefinition --> PrefixOperatorDefinition : prefix operators
 	OperatorSetDefinition --> InfixOperatorDefinition : infix operators
-	StatementSetDefinition --> StatementDefinition : statements
+	Language --> StatementDefinition : statements
 	Language --> OperatorSetDefinition : operator set
-	Language --> StatementSetDefinition : statement set
 ```
 
 ## Minimal example
@@ -321,7 +315,6 @@ import {
 	PrefixOperatorDefinition,
 	StatementArgumentDefinition,
 	StatementDefinition,
-	StatementSetDefinition,
 	toParserConfig
 } from "./parser/index.js";
 
@@ -334,7 +327,8 @@ const operatorSet = new OperatorSetDefinition({
 	}
 });
 
-const statementSet = new StatementSetDefinition({
+const language = createLanguage({
+	operatorSet,
 	statements: {
 		emit: new StatementDefinition({
 			parts: [
@@ -349,7 +343,6 @@ const statementSet = new StatementSetDefinition({
 	strictStatements: true
 });
 
-const language = createLanguage({ statementSet, operatorSet });
 const parser = createParser(toParserConfig(language));
 
 const statement = parser.parseLine("emit 1 + 2");

@@ -1,19 +1,16 @@
 import {
   cloneLanguage,
   cloneOperatorSet,
-  cloneStatementSet,
   createLanguage,
   StatementArgumentDefinition,
   StatementBlockDefinition,
   StatementDefinition,
   type Language,
-  type OperatorSetDefinition,
-  type StatementSetDefinition
+  type OperatorSetDefinition
 } from "../parser/index.js";
 import { expressionConfig } from "../lang/expression-config.js";
 
 export const SHELL_OPERATOR_SET_NAME = "shell_ops";
-export const SHELL_STATEMENT_SET_NAME = "shell_statements";
 export const SHELL_LANGUAGE_NAME = "shell";
 
 export const shellStatementDefinitions: Record<string, StatementDefinition> = {
@@ -57,9 +54,6 @@ export const shellStatementDefinitions: Record<string, StatementDefinition> = {
   raw: new StatementDefinition({
     parts: [new StatementArgumentDefinition({ name: "text", valueKind: "raw", positional: true, vararg: true })]
   }),
-  statements: new StatementDefinition({
-    parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
-  }),
   stmt: new StatementDefinition({
     parts: [new StatementArgumentDefinition({ name: "declaration", valueKind: "raw", positional: true, vararg: true })]
   }),
@@ -77,32 +71,24 @@ export const shellOperatorSet: OperatorSetDefinition = {
   infixOperators: { ...expressionConfig.infixOperators }
 };
 
-export const shellStatementSet: StatementSetDefinition = {
-  ...cloneStatementSet({
-    name: SHELL_STATEMENT_SET_NAME,
-    statements: shellStatementDefinitions,
-    defaultStatement: {
-      argumentKind: "raw",
-      parseNamedArguments: false
-    }
-  })
-};
-
 export const shellLanguage: Language = createLanguage({
-  statementSet: shellStatementSet,
-  operatorSet: shellOperatorSet
+  name: SHELL_LANGUAGE_NAME,
+  statements: shellStatementDefinitions,
+  operatorSet: shellOperatorSet,
+  defaultStatement: {
+    argumentKind: "raw",
+    parseNamedArguments: false
+  }
 }, {
   allowAssignmentStatements: true
 });
 
 export function createShellLanguageRegistries(): {
   operatorSets: Map<string, OperatorSetDefinition>;
-  statementSets: Map<string, StatementSetDefinition>;
   languages: Map<string, Language>;
 } {
   return {
     operatorSets: new Map([[SHELL_OPERATOR_SET_NAME, cloneOperatorSet(shellOperatorSet)]]),
-    statementSets: new Map([[SHELL_STATEMENT_SET_NAME, cloneStatementSet(shellStatementSet)]]),
     languages: new Map([[SHELL_LANGUAGE_NAME, cloneLanguage(shellLanguage)]])
   };
 }
@@ -113,14 +99,6 @@ export function registerOperatorSet(
   definition: OperatorSetDefinition
 ): void {
   registerNamedValue(registry, name, definition, "operator set");
-}
-
-export function registerStatementSet(
-  registry: Map<string, StatementSetDefinition>,
-  name: string,
-  definition: StatementSetDefinition
-): void {
-  registerNamedValue(registry, name, definition, "statement set");
 }
 
 export function registerLanguage(

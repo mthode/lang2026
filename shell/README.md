@@ -162,7 +162,7 @@ Examples:
 - `stmt choose condition (then {}) [else {}]`
 - `stmt --evaluate math_ops calc value body {} :: mini_lang`
 
-`stmt` is parse-only today. It does not create an executable shell command. Registered statements can be included in `statements` sets and then used by named `language` objects.
+`stmt` is parse-only today. It does not create an executable shell command. Registered statements can be included directly in named `language` objects.
 
 ### `operators`
 
@@ -185,31 +185,19 @@ Example:
 
 - `operators math_ops { infix + precedence 7 left; infix * precedence 8 left }`
 
-### `statements`
+### `language`
 
-Register a named statement set for parser scopes.
+Register a named parser language by combining an operator set with an inline statement list.
 
 Syntax:
 
-- `statements NAME { STATEMENT_NAMES... }`
+- `language NAME operators OPERATOR_SET { STATEMENT_NAMES... }`
 
 Entries may refer to built-in shell statements or parse-only statements previously registered with `stmt`.
 
 Example:
 
-- `statements mini_shell { echo if choose }`
-
-### `language`
-
-Register a named parser language by combining one statement set and one operator set.
-
-Syntax:
-
-- `language NAME statements STATEMENT_SET operators OPERATOR_SET`
-
-Example:
-
-- `language mini_lang statements mini_shell operators math_ops`
+- `language mini_lang operators math_ops { echo if choose }`
 
 ### `func`
 
