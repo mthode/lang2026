@@ -186,6 +186,55 @@ Code review for each parser task must explicitly verify these rules.
 
 ## Proposed Syntax
 
+### Declaration surface notation
+
+The `stmt` and `operators` declaration examples throughout this document use a
+shared, informal notation for describing a statement's parts. This notation
+only appears in this planning document to describe shapes; it is not new
+source syntax a shell program writes, and it is not a second user-visible
+grammar. Each symbol maps directly onto `StatementDefinition`'s existing parts,
+qualifiers, and option model:
+
+- `name` — a required positional part. `condition` in
+  `stmt choose condition (then {}) [else {}]` is a required expression-valued
+  argument named `condition`.
+- `(name ...)` — a required clause: a keyword-introduced group that must
+  appear exactly once, containing the parts listed inside it. `(then {})` is a
+  required `then` clause containing one block part.
+- `[name ...]` — an optional clause, argument, or block; everything inside
+  `[]` is entirely absent or entirely present together. `[else {}]` is an
+  optional `else` clause; `[associativity direction]` is an optional
+  associativity qualifier plus its direction value.
+- `name...` — a repeated (zero-or-more) part of that kind, bound to an opaque
+  repeated binding. `extras...` in `stmt echo extras...` is repeated raw
+  arguments.
+- `--name` — a flag-only qualifier option, bound to a boolean. `[--count]` in
+  `stmt child [--count] context [ordinal] syntaxValue` is an optional
+  flag-only qualifier.
+- `--name value` — a value-bearing option, distinct from a flag-only
+  qualifier. `--error message` in the `result` constructor's options is a
+  value-bearing option whose value narrows to a string.
+- `head` (in `stmt call [head symbol] open close ...`) — an optional
+  exact-match token that restricts a generic declaration (here, a call
+  operator) to one specific spelling; omitting it declares the generic,
+  unrestricted form.
+- `{}` and `{ languageName }` — a block part; empty braces mean an inherited
+  or default language and a bare identifier names an explicit block language,
+  as described under "Block language declarations and `cmd`" below. This is
+  the one place `{}` denotes a shape rather than literal program text.
+- A bare identifier immediately after `stmt`, `cmd`, `prefix`, `infix`, or
+  `call` (for example `choose`, `echo`, or the operator's `symbol`) is the
+  declaration's name or symbol, not a declared part.
+
+Each of these maps onto exactly one `StatementDefinition` concept: a required
+or optional positional part, a required or optional named clause, a repeated
+part, a flag-only or value-bearing qualifier option, or a block part with
+optional language metadata. The declaration surface still needs the bounded
+bootstrap exception described elsewhere in this document to parse `operators`,
+`language`, and `stmt`/`cmd` entries; this legend documents the shape that
+bootstrap parser must recognize, so it can be reviewed before task 3.4
+implements it.
+
 ### Language-scoped statement declaration with optional implementation
 
 `stmt` declares statement syntax and, optionally, its implementation inside one
@@ -433,10 +482,13 @@ expression.
 ### Parsing precedes evaluation
 
 Every argument declared with `valueKind: "expression"` is parsed into one
-`ExpressionNode` while the statement invocation is parsed. In a `stmt` context,
-the implementation receives that node without evaluation or an environment
-wrapper. In a `cmd` context, the parsed AST is instead evaluated greedily before
-the command implementation runs.
+`ExpressionNode` while the statement invocation is parsed. In a `cmd` context,
+the shared command handler evaluates that node greedily as the first step of
+handling the invocation, before the stored command body runs. In a `stmt`
+context there is no such automatic step: the invoked handler — whether a
+language-implemented body or a TypeScript primitive — receives the node
+without evaluation or an environment wrapper, and decides for itself whether,
+when, and how often to evaluate it as part of running.
 
 For example:
 
@@ -492,6 +544,15 @@ an opaque `ShellValue` through statement and expression results. `present` does
 not evaluate nodes: it returns false for the
 absent-value empty string and for an empty repeated binding, and true for a node
 or any other supplied value.
+
+Accepted limitation: for an optional raw-valueKind argument, a caller who
+explicitly supplies the empty string as that argument's value is
+indistinguishable from omitting it, since both bind to `""`; `present`
+reports `false` for either. Expression- and block-kind parts do not share this
+limitation, since their supplied value is always a node object, never
+literally `""`. A future revision may give raw arguments a distinct absent
+marker; until then, a statement with an optional raw argument should treat an
+explicit empty string the same as an absent one.
 
 `ExpressionNode` and `NestedBlockNode` do not contain or capture an execution
 environment. The implementation retains a reference to the exact scope in which
@@ -614,16 +675,18 @@ For a call, `symbol` is its opening delimiter. A non-empty call parser AST has
 the target plus one argument expression, and multiple logical arguments form a
 binary comma-expression AST. The current normalized call representation
 flattens that top-level comma spine as `[target, ...arguments]` in source order.
-An empty call has only the target operand. A configured exact head such as `$`
-is normalized as the identifier-like target value with that name.
+An empty call has only the target operand.
 
-`$()` is represented in the parser by a specialized
-`StatementCallExpressionNode`. It remains an `ExpressionNode`, but unlike an
-ordinary `CallExpressionNode` it contains a target `ExpressionNode`, the opening
-delimiter, and exactly one `StatementNode`. Ordinary calls remain expression-
-only and do not widen their argument type to accept statements. Normalizing the
-specialized node produces the ordinary call-shaped operator syntax value
-`[target, statement]`, where the second operand is a `StatementSyntaxValue`.
+`$ (...)` is represented in the parser by an ordinary `PrefixExpressionNode`
+whose operator is `$` and whose operand, produced by grouping's statement
+fallback, is a `GroupedStatementExpressionNode` wrapping exactly one
+`StatementNode`. Ordinary calls remain expression-only and do not widen their
+argument type to accept statements; a `GroupedStatementExpressionNode` is
+unrelated to the call-operator model and can only appear as a plain grouped
+primary. Normalizing a prefix operator whose operand is a
+`GroupedStatementExpressionNode` recurses into the wrapped `StatementNode`, so
+that operand position in the produced `SyntaxValue` is a `StatementSyntaxValue`
+rather than an `ExpressionSyntaxValue`.
 
 For example, inspecting `$ (evaluate context condition)` without executing it
 produces this outer structure:
@@ -631,10 +694,9 @@ produces this outer structure:
 ```ts
 {
   kind: "operator",
-  fixity: "call",
-  symbol: "(",
+  fixity: "prefix",
+  symbol: "$",
   operands: [
-    { kind: "identifier", name: "$" },
     {
       kind: "statement",
       name: "evaluate",
@@ -645,8 +707,8 @@ produces this outer structure:
 }
 ```
 
-`syntax context statementCall at 1` returns the original opaque
-`NamedStatementNode` represented by the second child rather than a fabricated
+`syntax context statementCall at 0` returns the original opaque
+`NamedStatementNode` represented by that one operand rather than a fabricated
 expression node.
 
 For a named statement, normalized children preserve its qualifiers, arguments,
@@ -757,6 +819,16 @@ statements used by implementation bodies:
 - `emit expression` — append statement output
 - ordinary declared control-flow statements needed to write handlers
 
+These are ordinary `stmt` declarations whose handlers happen to be implemented
+in TypeScript rather than shell. Like any `stmt` handler, each receives its
+expression-valued parameters as unevaluated `ExpressionNode` bindings when
+invoked; nothing evaluates them beforehand. `result`, `emit`, `return`,
+`present`, and `field` evaluate the specific parameters their own documented
+behavior requires as part of running, using the same internal evaluation entry
+point that the `evaluate` statement itself calls. This is the identical
+evaluate-from-within-the-handler pattern a language-implemented `stmt` uses by
+calling `evaluate` explicitly, not a separate eager-evaluation policy.
+
 Every executable handler construct must have a `StatementDefinition` in shell.
 A representative bootstrap surface is:
 
@@ -784,9 +856,9 @@ stmt emit value
 `result-break`, `result-continue`, `present`, `syntax`, `value-kind`, `kind`,
 `field`, and `child` must be declared as host-backed statements in shell's startup
 declarations. They use the same statement definitions and dispatch whether
-executed at the top level or inside `$()`. `$` is the host-backed
-head-restricted call operator that parses and executes one ordinary nested shell
-statement.
+executed at the top level or as `$`'s operand. `$` is an ordinary primitive
+prefix operator whose evaluator dispatches a nested shell statement produced by
+grouping's statement fallback (see D9).
 
 `value-kind context value` always succeeds for a valid `ShellValue` and returns
 one of `"number"`, `"string"`, `"boolean"`, `"expression-node"`,
@@ -945,8 +1017,8 @@ constructor statement itself return an `error` execution outcome with a short
 descriptive message; they do not construct a handler-visible result value.
 The `--name` spelling is ordinary shared statement-option syntax, not raw-tail
 or `result`-specific parsing. `StatementDefinition` must represent flag-only and
-value-bearing options with that spelling so future statements can use the same
-facility.
+value-bearing options with that spelling, plus the mutual-exclusivity grouping
+decided under D15, so future statements can use the same facility.
 
 The decomposition commands behave as follows:
 
@@ -1320,15 +1392,25 @@ Decision: do not introduce separate eager and deferred expression declaration
 forms. Expression syntax is parsed independently of evaluation policy. The
 statement receiving an expression determines when it is evaluated.
 
-- `cmd` is greedy. It evaluates every expression-valued invocation argument
-  before executing the command body. The body receives runtime values rather
-  than expression nodes.
-- `stmt` is deferred. It parses every expression-valued invocation argument into
-  an `ExpressionNode`, binds that node directly, and performs no automatic
-  evaluation.
-- A statement implementation evaluates a bound expression only through shell's
-  declared `evaluate` statement. It may evaluate the node
-  zero, one, or multiple times with contexts of its choosing.
+- `cmd` is greedy. Its shared built-in handler evaluates every expression-valued
+  invocation argument as its own first action, before it executes the stored
+  command body. The body receives runtime values rather than expression nodes.
+- `stmt` is deferred. No evaluation occurs before a `stmt` handler is invoked.
+  Every expression-valued invocation argument is parsed into an
+  `ExpressionNode` and bound directly to the handler's parameter, unevaluated.
+  This is true whether the invoked handler is a language-implemented body or a
+  TypeScript primitive: both receive the same unevaluated node, and both are
+  free to evaluate it, ignore it, or evaluate it more than once as part of
+  running. Nothing evaluates it on their behalf beforehand.
+- Once invoked, a handler evaluates a bound expression using the evaluation
+  entry point available to it. A shell-language implementation body does this
+  only through shell's declared `evaluate` statement. A TypeScript primitive
+  implementation — including `evaluate` itself, `result`, `emit`, `return`,
+  `present`, and `field` — instead calls the same underlying evaluator
+  directly, since it cannot invoke a shell statement from TypeScript. Either
+  way, evaluation happens inside the invoked handler's own logic, not as an
+  automatic step that runs before the handler starts. A handler may evaluate
+  the node zero, one, or multiple times with contexts of its choosing.
 - Shell's declared `syntax` statement converts a parsed expression or statement
   node to detached inspection data without evaluating or executing it. `kind`,
   `field`, and `child` inspect that data.
@@ -1339,7 +1421,9 @@ statement receiving an expression determines when it is evaluated.
 
 The runtime must not attach an eager/deferred strategy to an expression
 declaration. Evaluation policy belongs to the consuming statement definition
-and execution context.
+and execution context: `cmd`'s shared handler applies its evaluation policy
+before the stored body runs, while every `stmt` handler, custom or primitive,
+applies its own policy from within its own execution.
 
 ### D4. Statement and execution results
 
@@ -1421,7 +1505,11 @@ retains the optional head, delimiters, precedence, and operand/list rules; the
 runtime companion stores the parsed implementation body, its resolved shell
 language, and a reference to its exact declaration scope. Only the matched
 pairs `()`, `{}`, and `[]` are valid call delimiters;
-a `call` declaration must reject every other or mismatched pair. The opening
+a `call` declaration must reject every other or mismatched `open`/`close` pair
+at declaration time, when the `call` statement itself is parsed, not when it is
+first used or bound. For example, `call open ( close ]` is rejected immediately
+as a mismatched pair, before any parameter, body, or primitive binding is
+considered. The opening
 delimiter is the call operator symbol used for parsing and runtime lookup; the
 closing delimiter is implied by the supported matched pair. An optional exact
 head is added to the lookup key only to distinguish a head-restricted call from
@@ -1438,13 +1526,18 @@ relying on the parser to evaluate operands.
 
 The expression parser consults the active operator set before consuming a call
 delimiter. It must not contain an identifier-specific call loop. Parser state
-determines the delimiter's role: while expecting a value, `(` starts grouping;
-after a left value has been parsed, a selected opening delimiter is a postfix
-call operator. For example, the `(` in `2 + (` begins the right-hand grouped
-value, while the `(` in `$ (` continues the `$` value as a call. A generic call
-operator applies after any valid target; a head-restricted call applies only to
-its configured value and takes priority over a generic call for that value. If
-no matching call operator is selected, the delimiter is not an expression
+determines the delimiter's role: while expecting a value, `(` starts grouping
+(subject to grouping's own statement fallback, decided under D9); after a left
+value has been parsed, a selected opening delimiter is a postfix call operator.
+For example, the `(` in `2 + (` begins the right-hand grouped value, while the
+`(` following a call operator's target, such as `f(` when a matching call
+operator is selected, continues that target as a call. A generic call operator
+applies after any valid target; a head-restricted call applies only to its
+configured value and takes priority over a generic call for that value. `$`
+has no call-operator declaration, so it never triggers this continuation:
+`$ (...)` always parses its `(` as ordinary grouping, which is exactly what
+allows grouping's statement fallback to produce `$`'s nested-statement operand.
+If no matching call operator is selected, the delimiter is not an expression
 continuation and the statement argument parser applies ordinary
 positional-boundary rules.
 
@@ -1581,22 +1674,49 @@ mutation or persistence facility. External composition, for example through
 This is consequential because shell commands such as `evaluate`, `execute`,
 the `result-*` decomposition commands, `present`, `syntax`, `value-kind`, `kind`,
 `field`, and `child` must be usable in an expression without creating a second command
-namespace or grammar.
+namespace or grammar, and without adding parsing logic that is specific to `$`.
 
-Decision: shell omits the generic `()` call operator and selects an optional
-head-restricted `()` call headed by `$`. `$ ( ... )` parses and executes exactly
-one ordinary shell statement in a nested, value-consuming position. The nested
-statement uses the same `shell` language, `StatementDefinition`, implementation,
-and normal dispatch path as the identical statement at the top level. There is
-no `$()`-specific statement set, separate command registry, or private command
-grammar.
+Decision: `$` is an ordinary primitive prefix operator, declared and parsed
+through the same generic `prefix` mechanism as any other prefix operator (for
+example unary `-`). No call-operator declaration, exact-head matching, or
+lookahead exists for `$`. The only parser change this notation requires is
+generic and applies to every language: grouping (`(...)`) may hold either an
+ordinary expression or, when its content cannot be parsed as one complete
+expression up to the matching `)`, a single statement parsed by the same
+generic statement parser used at the top level. That fallback statement is
+carried by one new expression node:
 
-When used inside `$()`, the nested statement must produce an internal
-`StatementResult` with `execution.kind === "complete"` and a `value`; `$()`
-yields that typed value to the enclosing expression. A non-complete execution
-outcome propagates through the enclosing statement body instead of producing a
-value. A statement that completes without a value produces a descriptive
-no-value error result in this position. At the top level, the same
+```ts
+export class GroupedStatementExpressionNode {
+  readonly kind = "grouped-statement";
+
+  constructor(readonly statement: StatementNode) {}
+}
+```
+
+This node is an ordinary `ExpressionNode` variant produced by grouping alone;
+it has no dependency on `$` or on any operator declaration.
+
+`$`'s primitive evaluator special-cases only at evaluation time: when its
+operand is a `GroupedStatementExpressionNode`, `$` dispatches the wrapped
+`StatementNode` through the ordinary statement executor instead of evaluating
+its operand as an expression. The nested statement uses the same `shell`
+language, `StatementDefinition`, implementation, and normal dispatch path as
+the identical statement written at the top level. There is no `$`-specific
+statement set, separate command registry, or private command grammar. When
+`$`'s operand is an ordinary expression rather than a grouped statement,
+evaluating `$` is a descriptive runtime error: `$` has no defined behavior
+other than dispatching a nested statement. A bare `$` with no following
+operand at all is simply a parse error for a missing required prefix operand,
+identical to any other prefix operator; `$` is declared only as a `prefix`
+operator and is never treated as a bare identifier or an ordinary value.
+
+When `$` dispatches its nested statement, the statement must produce an
+internal `StatementResult` with `execution.kind === "complete"` and a `value`;
+`$` yields that typed value as its own expression result. A non-complete
+execution outcome propagates through the enclosing statement body instead of
+producing a value. A statement that completes without a value produces a
+descriptive no-value error result in this position. At the top level, the same
 value-producing statement executes normally and its unused value is discarded
 after ordinary output handling. The value may be any `ShellValue`:
 `evaluate`, `execute`, and `result` produce opaque `ExecutionResult` objects;
@@ -1607,29 +1727,39 @@ as an opaque repeated binding.
 
 The notation must satisfy all of these requirements:
 
-- shell does not select a generic `()` call operator;
+- shell selects no generic `()` call operator;
+- `$` requires no call-operator declaration, exact-head matching, or parser
+  knowledge of its own symbol beyond an ordinary prefix-operator entry;
+- grouping's fallback to statement parsing is a generic parser capability
+  usable by any expression, not a feature conditioned on `$`;
 - every statement declared by `shell` can be parsed and dispatched both at the
-  top level and inside `$()`;
+  top level and as `$`'s operand;
 - it can pass an explicit `context` plus one or more operands without relying
   on whitespace splitting outside the expression parser;
 - it can accept unevaluated `ExpressionNode` and `NestedBlockNode` values where
-  required;
-- `$` resolves through the selected operator set, and its nested statement
-  resolves through the ordinary shell statement dispatcher rather than a
-  source-prefix special case.
+  required.
 
-#### `$()` nested statements
+#### Grouping's statement fallback
 
-The core parser continues to support a generic call operator: when a language
-selects a generic `()` call operator, any valid expression target followed by
-`()` is one call expression. Thus a language selecting that operator parses
-`foo (1)` as `target ( arguments )`; a language omitting it parses the same
-tokens as separate positional expressions where the statement shape permits.
-This behavior is determined solely by the active operator set.
+Ordinary grouping remains a parser fundamental: `(` opens, the parser attempts
+to parse one complete expression, and `)` must close it exactly where the
+expression ends. This decision adds exactly one fallback: if the tokens up to
+the matching `)` do not reduce to one complete expression (for example, a bare
+statement invocation such as `evaluate context condition`, which has no
+operator between its positional identifiers), the parser instead parses that
+same span, in full, with the ordinary generic statement parser and wraps the
+result in a `GroupedStatementExpressionNode`. A practical implementation first
+locates the matching `)` by tracking nested delimiter depth, then attempts the
+expression parse bounded by that span, and falls back to a statement parse of
+that exact span only if the expression parse does not consume it entirely,
+avoiding exception-driven backtracking. This applies uniformly to every `(`
+grouping in the language, independent of any operator, so it does not
+special-case `$`.
 
-Shell's aversion is only to its own generic call syntax. The selected `$` head
-call applies only after `$`, so ordinary source remains positional while a
-nested statement has an explicit expression boundary:
+Ordinary arithmetic grouping such as `(1 + 2)` is unaffected: it already
+reduces to one complete expression, so the fallback never triggers. Call
+operator arguments remain expression-only; they never accept the
+grouped-statement form. The fallback applies only to plain grouping.
 
 ```text
 $ (evaluate context condition)
@@ -1640,13 +1770,21 @@ $ (field context $ (syntax context node) "name")
 $ (evaluate context $ (syntax context arguments at 0 1))
 ```
 
-When shell omits the generic parenthesized call continuation, ordinary source
-remains positional:
+Ordinary source remains positional wherever a plain expression fully consumes
+a parenthesized span:
 
 ```text
-foo (1)                 # two expressions where the statement shape permits
-evaluate (context value) # two expressions unless `evaluate` is also a call head
+foo (1)                  # two expressions where the statement shape permits
+evaluate (context value)  # two expressions: evaluate, then grouped (context value)
 ```
+
+`evaluate (context value)` differs from `evaluate context value`:
+`(context value)` is not one complete expression (two bare identifiers, no
+operator), so it falls back to a statement parse of `context value`, an
+undeclared statement that ordinarily fails to parse or dispatch, rather than
+binding `context` and `value` as `evaluate`'s two positional arguments. Only
+`$ (evaluate context value)`, where `(evaluate context value)` is `$`'s single
+operand, produces the intended nested statement.
 
 Suggested initial built-in handler runtime commands are:
 
@@ -1680,56 +1818,39 @@ statement implementation.
 
 `execute`, `emit`, and `return` use the same ordinary statement model.
 `execute` produces an `ExecutionResult`, while `emit` does not produce a value
-and therefore produces the ordinary no-value error when placed directly inside
-`$()`. `return` accepts any `ShellValue` in an operator implementation and
-requires an `ExecutionResult` in a statement implementation. A future `source` command is
+and therefore produces the ordinary no-value error when used as `$`'s operand.
+`return` accepts any `ShellValue` in an operator implementation and requires an
+`ExecutionResult` in a statement implementation. A future `source` command is
 deferred with source-span exposure.
 
-The parser impact is moderate rather than fundamental:
+The parser impact is:
 
-1. Extend a call-operator definition with an optional exact head matcher and
-  an operand mode. The generic mode has zero or one argument-expression operand;
-  multiple logical arguments form one binary comma-expression AST. The `$`
-  head-call mode has one parsed nested-statement operand. Its command name and
-  arguments are parsed by the ordinary shell statement parser. The opening
-  delimiter is the operator symbol; its matching close is implied. Generic mode
-  constructs the existing expression-only `CallExpressionNode`; nested-statement
-  mode constructs `StatementCallExpressionNode` with separate `callee`,
-  `operator`, and `statement` fields.
-2. When parsing an expression continuation after a left value, consume an
-  opening delimiter only if a matching generic or exact-head call operator is
-  selected. When the parser is expecting a primary, treat a configured exact
-  head such as `$` as an identifier-like value only when a
-  one-significant-token lookahead finds
-  that head call's opening delimiter. Whitespace does not affect that lookahead.
-  The normal continuation step then consumes the opening delimiter as the call
-  operator. In all other value positions, an opening `(` retains its grouping
-  role.
-3. If neither applicable operator is selected, do not consume the delimiter.
-  Consequently, `foo (1)` stops after `foo`, and the existing uniform
-  positional-boundary rule divides it into two statement arguments when the
-  declaration permits.
-4. Execute the parsed `$()` statement through the ordinary shell statement
+1. Add grouping's statement fallback exactly as described above. This is the
+  only change to expression-primary parsing, and it is not conditioned on `$`
+  or on any other operator symbol.
+2. Declare `$` as an ordinary primitive prefix operator with a precedence high
+  enough that it binds only to its immediate operand, so `$ (foo) + 1` parses
+  as `($ (foo)) + 1` and never absorbs the trailing `+ 1` into its own operand.
+3. Give `$`'s primitive prefix evaluator the one special case described above:
+  dispatch a `GroupedStatementExpressionNode` operand as a nested statement;
+  reject any other operand kind with a descriptive runtime error.
+4. Execute the parsed nested statement through the ordinary shell statement
   dispatcher. The dispatcher binds its typed arguments in the same way at the
-  top level and in nested execution; `$()` first propagates a non-complete
+  top level and in this nested position; `$` first propagates a non-complete
   `StatementResult.execution` and otherwise consumes `StatementResult.value`.
 
 This is simpler than a generic shell call because it avoids callable runtime
-values and keeps handler-binding conversion inside built-in commands. It does
-add parser configuration and tests for head matching, nested `$()` calls, and
-nested-statement value capture. The expression AST must preserve `$` as the call target
-value and the opening delimiter as the call operator symbol rather than treating
-`$` as a standalone prefix expression. The scanner already emits `$` as an
-operator token, so no scanner change is needed.
+values, keeps handler-binding conversion inside built-in commands, and removes
+call-operator machinery, exact-head matching, and lookahead entirely from `$`.
+It requires one small, generic addition to grouping, plus tests for the
+grouping fallback, `$`'s special-cased evaluation, and nested-statement value
+capture. The scanner already emits `$` as an operator token, so no scanner
+change is needed.
 
-Generic and head-restricted calls coexist as separately declared call-operator
-forms. Generic calls remain available to every language through an operator-set
-entry. Shell selects its `$` head call; a language may omit it. A language
-selecting both forms with the same opening delimiter gives the exact head call
-priority for its matching value; all other targets use the generic call. The
-opening delimiter alone identifies the generic call. The pair of exact head and
-opening delimiter identifies a head-restricted call. Duplicate declarations for
-either key are rejected.
+`$` does not participate in the call-operator model described under D5.
+Generic and head-restricted `call` declarations remain available for languages
+that want conventional `target(arguments)` call syntax; they are unrelated to
+`$` and to grouping's statement fallback.
 
 ### D10. Block language syntax and command restriction
 
@@ -1926,6 +2047,51 @@ language; they are not valid top-level declaration source. Implementation must
 not preserve the current global declaration behavior merely to keep an
 abbreviated example executable.
 
+### D15. Value-bearing statement options
+
+This is consequential because `result`'s six mutually exclusive options
+(`--complete`, `--expression value`, `--return value`, `--break`, `--continue`,
+`--error message`) need a `StatementDefinition` capability that does not exist
+today: `StatementQualifierDefinition` (`parser/statement.ts`) represents only a
+boolean flag keyword, with no way to attach a value to an option or to declare
+mutual exclusivity among a group of options. The same shape is reused
+throughout this plan (`--count` is flag-only; `--error message` is
+value-bearing), so its parsing and validation rules must be settled before
+task 3.1 declares `result` and the other handler runtime commands.
+
+Decision: extend the statement-option model with two option kinds plus an
+optional mutual-exclusivity grouping.
+
+- A **flag-only option** (`--name`) is the existing boolean qualifier: present
+  or absent, bound to `true`/`false`.
+- A **value-bearing option** (`--name value`) additionally consumes exactly one
+  expression-valued argument named `value` immediately following its keyword.
+  It is bound like any other expression-valued part: an unevaluated
+  `ExpressionNode`, following the same deferred-value rules as a positional
+  argument.
+- Declaring a set of options as an **exclusivity group** (for example
+  `result`'s six options) requires exactly one option in that group to be
+  present in a given invocation. Zero or more than one present option is a
+  descriptive parse-time error identifying the group and the offending option
+  names; the error is raised by the statement parser before the handler is
+  invoked, not by the handler body.
+- Options outside a declared exclusivity group remain independently optional,
+  as `[--count]` already is for `child`.
+- A value-bearing option's value is parsed with the same positional-boundary
+  rules as an ordinary required argument: it consumes exactly one expression up
+  to the next declared clause, option, or statement boundary.
+- Option keywords participate in statement-boundary detection exactly like
+  qualifier keywords do today: encountering a declared `--name` stops
+  positional-argument or vararg collection for the current part, per the
+  existing boundary rules.
+- A value-bearing option may not itself contain a vararg or repeated part in
+  this first implementation.
+
+`stmt result [--complete] [--expression value] [--return value] [--break]
+[--continue] [--error message]` declares one exclusivity group over all six
+options; declaring the same six as independent optional value-bearing options
+instead would not enforce "exactly one" and is rejected.
+
 ## Implementation Plan
 
 ### 1. Specify runtime values and handler behavior
@@ -1941,7 +2107,7 @@ abbreviated example executable.
 - [ ] 1.9 Define a parser-change checklist based on the canonical common `stmt` model and apply it to every later task.
 - [x] 1.10 Decide D6: register startup signatures, bind the TypeScript primitive subset, then process nonprimitive declarations and user source in order.
 - [x] 1.11 Decide D8: give every `stmt` and operator handler a single `context` binding instead of a prescribed storage primitive.
-- [x] 1.12 Decide D9: shell uses the `$()` head call to execute one ordinary shell statement through the same parser and dispatcher used at the top level, then consumes its value.
+- [x] 1.12 Decide D9: shell declares `$` as an ordinary primitive prefix operator whose evaluator dispatches a nested statement produced by grouping's generic statement fallback, using the same parser and dispatcher used at the top level, then consumes its value.
 - [x] 1.13 Decide the generic call argument grammar: delimiters contain zero or one expression AST; multiple logical arguments use the selected binary comma operator, trailing commas and whitespace-separated values are rejected, and call `SyntaxValue` currently flattens the top-level comma spine after the target.
 - [x] 1.14 Decide statement scope: every statement declaration, syntax definition, implementation, and declaration scope is owned by one language; names are unique only within that language; and TypeScript bindings use qualified `(languageName, statementName)` keys.
 - [x] 1.15 Decide `return` semantics: handler-level `return` exits the current implementation body; an operator implementation may return any dynamic `ShellValue`, while a statement implementation must return an `ExecutionResult` explicitly constructed with `result`. Returns in caller blocks become `return` outcomes, and operator fallthrough becomes an error result.
@@ -1952,7 +2118,7 @@ abbreviated example executable.
 - [x] 1.20 Decide captured outcome propagation: add `result` as the constructor for every `ExecutionResult` kind; require custom statement implementations to inspect captured outcomes and explicitly construct the result they return; provide no automatic propagation of outcomes contained in values; and make ordinary statement bodies propagate their child statement's direct non-complete execution outcomes structurally.
 - [x] 1.21 Revise the TypeScript value model: require every built-in and user command to return `StatementResult`; allow every `ShellValue` in statement and expression value positions; keep shell values dynamically typed and opaque; require runtime narrowing through `value-kind` and specialized commands; and exclude `expression` from the internal statement-control union by normalizing it to `complete` plus `StatementResult.value`.
 - [x] 1.22 Complete scalar AST inspection: make indexed `child` return one detached syntax value, add `child --count` for cardinality, reserve structural traversal to those commands, and define the initial per-kind scalar `field` matrix.
-- [x] 1.23 Decide `$()` AST representation: add a specialized `StatementCallExpressionNode` containing one `StatementNode`; keep ordinary call arguments expression-only; add statement syntax variants, statement-node shell values and narrowing, and statement-aware `syntax`, `child`, and `field` behavior.
+- [x] 1.23 Decide `$`'s nested-statement representation: generalize grouping to fall back to a full statement parse when its parenthesized content is not one complete expression, producing a `GroupedStatementExpressionNode` containing one `StatementNode`; keep ordinary call arguments expression-only; add statement syntax variants, statement-node shell values and narrowing, and statement-aware `syntax`, `child`, and `field` behavior.
 - [x] 1.24 Decide D13 fallback dispatch: use a language-owned `__fallback__` statement, trigger it only when the source name matches no declaration in the active language, require fallback source to parse fully, give every exact declared name precedence over OS commands, and produce an error when no completed fallback is available.
 - [x] 1.25 Decide fallback ownership: every language owns an independent `__fallback__` declaration and handler under the same scoping rules as its other statements; only name-miss dispatch is special.
 - [x] 1.26 Decide the fallback signature and invocation binding: use `stmt __fallback__ command arguments...`; map the unmatched source name to `command` and parse the remainder as ordinary repeated `arguments` using the common statement rules.
@@ -1960,6 +2126,7 @@ abbreviated example executable.
 - [ ] 1.28 **Decision: define the initial OS-backed fallback result contract.** Specify stdout, stderr, exit status, spawn failures, `StatementResult.output`, optional `StatementResult.value`, and `$()` behavior for shell's OS-command handler.
 - [x] 1.29 Decide direct `__fallback__` source behavior: allow direct exact-name invocation as ordinary statement behavior, but do not advertise it as a feature.
 - [x] 1.30 Decide D14 language-scoped declaration syntax: place `stmt` and `cmd` definitions inside the owning `language`, use `extend language` for additions and same-language completion, require qualified TypeScript bindings, and reject unqualified top-level definitions.
+- [ ] 1.31 Decide D15: extend the statement-option model with value-bearing options (`--name value`) alongside existing flag-only options, plus a declared mutual-exclusivity group that requires exactly one present option and reports a descriptive parse-time error otherwise; declare `result`'s six options as one exclusivity group.
 
 ### 2. Separate runtime dispatch from shell command dispatch
 
@@ -1973,8 +2140,8 @@ abbreviated example executable.
 
 ### 3. Declare and parse implementation bodies in shell
 
-- [ ] 3.1 Extend the common `StatementDefinition` model with shared `--name` flag-only and value-bearing option syntax, then define shell entries for `if`, `while`, `break`, `continue`, `execute`, `return`, `emit`, and the handler runtime commands, including the six-option `result` constructor, `result-kind`, `result-value`, `result-error`, `result-break`, `result-continue`, `value-kind`, `child [--count] context [ordinal] syntaxValue`, and `syntax context node [at indexes...]`; select those same statements for top-level and `$()` execution without command-specific raw-tail parsing.
-- [ ] 3.2 Define shell's `$` head-restricted call operator as a specialized `StatementCallExpressionNode` so its operand is parsed as one ordinary shell `StatementNode` and dispatched through the normal statement executor; keep ordinary `CallExpressionNode` arguments expression-only and do not add a separate nested-command registry.
+- [ ] 3.1 Extend the common `StatementDefinition` model with the D15 value-bearing option and mutual-exclusivity-group syntax, then define shell entries for `if`, `while`, `break`, `continue`, `execute`, `return`, `emit`, and the handler runtime commands, including the six-option `result` constructor, `result-kind`, `result-value`, `result-error`, `result-break`, `result-continue`, `value-kind`, `child [--count] context [ordinal] syntaxValue`, and `syntax context node [at indexes...]`; select those same statements for top-level and `$()` execution without command-specific raw-tail parsing.
+- [ ] 3.2 Declare `$` as an ordinary primitive prefix operator with no call-operator declaration; generalize grouping to produce a `GroupedStatementExpressionNode` when its content does not reduce to one complete expression, and give `$`'s evaluator the one special case that dispatches that node's `StatementNode` through the normal statement executor; keep ordinary `CallExpressionNode` arguments expression-only and do not add a separate nested-command registry.
 - [ ] 3.3 Extend shell with typed-value handling and the declared handler runtime commands required by implementation bodies; do not introduce a dedicated handler language.
 - [ ] 3.4 Extend the bootstrap language-declaration parser with the decided language-scoped `stmt` syntax and recognize the reserved `implement context body { shell } { ... }` suffix, then parse every suffix body with the generic statement parser and resolved shell language.
 - [ ] 3.5 Treat a language-owned `stmt` without the inline implementation suffix as unresolved; allow one matching qualified TypeScript or same-language completion, and report an error only if execution reaches it first.
@@ -1989,11 +2156,11 @@ abbreviated example executable.
 - [ ] 3.14 Remove `:: languageName` parsing from statement declarations and reject it with a migration-oriented error.
 - [ ] 3.15 Make `cmd` a language-scoped statement declaration using the shared command handler; remove custom body-language capture and ensure every command body uses the fixed shell command-body language.
 - [ ] 3.16 For every parser file modified in this phase, remove specialized parsing from the touched path or document a bounded temporary exception and follow-up removal task.
-- [ ] 3.17 Define and parse `prefix`, `infix`, generic `call`, and optional head-restricted `call head symbol` declarations, including the generic zero-or-one expression operand, comma-expression argument representation, the `$` nested-statement operand mode, opening-delimiter operator identity, the supported `()`, `{}`, and `[]` matched pairs, head precedence over generic calls, duplicate-key rejection, and body arity validation.
-- [ ] 3.18 Remove the hard-coded identifier-call loop from the expression parser; make call continuation depend exclusively on parser state, the selected opening delimiter, and one-significant-token lookahead for an exact head such as `$`.
+- [ ] 3.17 Define and parse `prefix`, `infix`, generic `call`, and optional head-restricted `call head symbol` declarations, including the generic zero-or-one expression operand, comma-expression argument representation, opening-delimiter operator identity, the supported `()`, `{}`, and `[]` matched pairs with declaration-time rejection of any other or mismatched `open`/`close` pair, head precedence over generic calls, duplicate-key rejection, and body arity validation. `$` is declared as an ordinary `prefix` operator and never uses this call-declaration model.
+- [ ] 3.18 Remove the hard-coded identifier-call loop from the expression parser; make call continuation depend exclusively on parser state and the selected opening delimiter, with no lookahead or special-casing for any operator symbol, including `$`.
 - [ ] 3.19 Make every positional statement-argument parser path use the same selected-call boundary rule: without an applicable generic or head-restricted call operator, `foo (1)` can bind two expression arguments; with an applicable operator, it binds one call expression.
 - [ ] 3.20 Make `language` own local `stmt`, `cmd`, and reserved `__fallback__` declarations while selecting an operator set; do not add a separate expression-form registry or host-level unknown-name policy.
-- [ ] 3.21 Create the authoritative startup declaration script: declare `shell_ops`; declare every built-in shell statement, command form, and `$` head-restricted call operator inside the named `shell` language; include `stmt __fallback__ command arguments...`; and omit a generic call operator.
+- [ ] 3.21 Create the authoritative startup declaration script: declare `shell_ops`; declare every built-in shell statement and command form inside the named `shell` language, including `$` as an ordinary primitive `prefix` operator; include `stmt __fallback__ command arguments...`; and omit a generic call operator.
 - [ ] 3.22 Implement the three-phase bootstrap: register startup signatures and `shell` with the minimal declaration seed, bind TypeScript primitives, then process nonprimitive declarations and user source in order; discard seed-only definitions once the primitive declaration surface is executable.
 - [ ] 3.23 Replace TypeScript-constructed built-in statement and operator signatures with declarations produced inside the startup `shell` language and the operator set it selects.
 - [ ] 3.24 Bind TypeScript primitive statement handlers by validated `(languageName, statementName)` keys and primitive operator evaluators by their existing qualified operator keys after signature registration and before nonprimitive or user source processing.
@@ -2047,7 +2214,7 @@ abbreviated example executable.
 ### 8. Bind custom operators
 
 - [x] 8.1 Decide D5: use direct operator implementation bodies; an omitted body declares a primitive eligible for a TypeScript binding.
-- [ ] 8.2 Define the selected `prefix`, `infix`, generic `call`, and head-restricted `call` statement forms; require their optional parameter-and-body group to be all-or-nothing; validate prefix arity one, infix arity two, generic target-plus-optional-expression arity, `$` nested-statement operand handling, and only the `()`, `{}`, and `[]` call-delimiter pairs.
+- [ ] 8.2 Define the selected `prefix`, `infix`, generic `call`, and head-restricted `call` statement forms; require their optional parameter-and-body group to be all-or-nothing; validate prefix arity one, infix arity two, generic target-plus-optional-expression arity, and only the `()`, `{}`, and `[]` call-delimiter pairs, rejecting any other or mismatched `open`/`close` pair at declaration time. `$` is declared as an ordinary bodyless `prefix` operator bound to a `PrimitiveOperatorBinding` implementing the grouped-statement dispatch described under D9.
 - [ ] 8.3 Store parsed handler bodies and primitive host bindings outside `OperatorSetDefinition` or in a runtime companion object; permit unbound selected primitives and reject them only when evaluation reaches them.
 - [ ] 8.4 Dispatch prefix, infix, and call evaluation through the active operator-set runtime binding.
 - [ ] 8.5 Retain current built-in arithmetic behavior through explicit TypeScript primitive bindings.
@@ -2122,18 +2289,18 @@ abbreviated example executable.
   parses `foo (1)` as identifier `foo` followed by grouped expression `1`.
 - With a selected `()` call operator, the same statement shape parses `foo (1)`
   as one call-operator expression and reports the absent second argument.
-- A shell operator set that omits generic `()` calls but selects `call head "$" "(" ")"` parses `$ (evaluate context value)` as a call expression and still parses `foo (1)` as two positional expressions where permitted.
-- The parsed `$ (evaluate context value)` node is a
-  `StatementCallExpressionNode` whose `statement` is the same
-  `NamedStatementNode` shape produced for top-level `evaluate context value`;
-  ordinary `CallExpressionNode.args` remains `ExpressionNode[]`.
-- A language selecting both a generic `()` call and a `$` head call gives the `$` head call priority for `$ (value)` and uses the generic call for `foo (1)`.
+- Grouping `(evaluate context condition)` on its own, with no preceding `$`, does not reduce to one complete expression, so it falls back to a full statement parse and produces a `GroupedStatementExpressionNode` wrapping the `evaluate context condition` `NamedStatementNode`.
+- `$ (evaluate context value)` parses as an ordinary `PrefixExpressionNode` whose operator is `$` and whose operand is that same `GroupedStatementExpressionNode`; ordinary `CallExpressionNode.args` remains `ExpressionNode[]` and is unaffected.
+- `$` never triggers call continuation and needs no call-operator declaration: whether or not a language also selects a generic `()` call operator, `$ (value)` still parses `$` as a prefix operator applied to grouped content, and `foo (1)` still follows the ordinary call-operator boundary rule independent of `$`.
 - While expecting a value, `(` groups an expression, including after an infix
   operator as in `2 + (1)`; after a parsed left value, a selected `(` is the call
-  operator.
-- A configured `$` head is accepted as an identifier-like target value only
-  when one-significant-token lookahead finds its selected opening delimiter;
-  whitespace before the delimiter does not change the result.
+  operator. `$`, having no call-operator declaration, never causes this
+  postfix-call continuation.
+- `$ (1 + 2)` is a runtime error: `(1 + 2)` reduces to one complete expression
+  rather than a grouped statement, and `$`'s evaluator rejects any operand that
+  is not a `GroupedStatementExpressionNode`.
+- `$ (foo) + 1` parses as `($ (foo)) + 1`, proving `$`'s declared precedence
+  binds only to its immediate parenthesized operand.
 - `evaluate`, `execute`, `result`, every `result-*` decomposition command,
   `syntax`, `present`, `value-kind`, `kind`, `field`, and `child` resolve through
   the same declared shell statements at the top level and inside `$()`.
@@ -2298,10 +2465,10 @@ abbreviated example executable.
 - The default `syntax` result exposes every semantically relevant field and
   child relationship of every supported expression- and statement-node variant;
   source locations are the only intentionally deferred AST metadata.
-- Normalizing `$ (evaluate context value)` produces a call operator syntax value
-  whose children are the `$` target and a `statement` syntax value for
-  `evaluate`; it does not execute `evaluate`.
-- `syntax context statementCall at 1` returns the original `StatementNode`.
+- Normalizing `$ (evaluate context value)` produces a prefix operator syntax
+  value whose one operand is a `statement` syntax value for `evaluate`; it does
+  not execute `evaluate`.
+- `syntax context statementCall at 0` returns the original `StatementNode`.
   Deeper paths can return original expression or nested-block handles, while a
   path ending on an `argument`, `block`, `qualifier`, or `clause` metadata
   wrapper is rejected.
